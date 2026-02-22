@@ -14,15 +14,178 @@ var temp_scale_display = "C";
 var kwh_rate = 0.26;
 var currency_type = "EUR";
 
+var current_zone = 0;
+var available_zones = [
+    {id: 0, name: "Zone 1"},
+    {id: 1, name: "Zone 2"},
+    {id: 2, name: "Zone 3"}
+];
+
 var protocol = 'ws:';
 if (window.location.protocol == 'https:') {
     protocol = 'wss:';
 }
 var host = "" + protocol + "//" + window.location.hostname + ":" + window.location.port;
-var ws_status = new WebSocket(host+"/status");
-var ws_control = new WebSocket(host+"/control");
 var ws_config = new WebSocket(host+"/config");
 var ws_storage = new WebSocket(host+"/storage");
+
+var ws_status = null;
+var ws_control = null;
+
+function zoneQuery() {
+    return "?zone=" + encodeURIComponent(current_zone);
+}
+
+function connectZoneSockets() {
+    try { if (ws_status) ws_status.close(); } catch (e) {}
+    try { if (ws_control) ws_control.close(); } catch (e) {}
+
+    ws_status = new WebSocket(host + "/status" + zoneQuery());
+    ws_control = new WebSocket(host + "/control" + zoneQuery());
+
+    bindStatusSocket();
+    bindControlSocket();
+
+    // Reset live graph when changing zones
+    graph.live.data = [];
+    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ] , getOptions());
+}
+
+function bindStatusSocket() {
+    ws_status.onopen = function()
+    {
+        console.log("Status Socket has been opened");
+    };
+
+    ws_status.onclose = function()
+    {
+        $.bootstrapGrowl("<span class=\"glyphicon glyphicon-exclamation-sign\"></span> <b>ERROR 1:</b><br/>Status Websocket not available", {
+        ele: 'body',
+        type: 'error',
+        offset: {from: 'top', amount: 250},
+        align: 'center',
+        width: 385,
+        delay: 5000,
+        allow_dismiss: true,
+        stackup_spacing: 10
+      });
+    };
+
+    ws_status.onmessage = function(e)
+    {
+        x = JSON.parse(e.data);
+        if (x.type == "backlog")
+        {
+            if (x.profile)
+            {
+                selected_profile_name = x.profile.name;
+                $.each(profiles,  function(i,v) {
+                    if(v.name == x.profile.name) {
+                        updateProfile(i);
+                        $('#e2').select2('val', i);
+                    }
+                });
+            }
+
+            $.each(x.log, function(i,v) {
+                graph.live.data.push([v.runtime, v.temperature]);
+                graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ] , getOptions());
+            });
+        }
+
+        if(state!="EDIT")
+        {
+            state = x.state;
+            if (state!=state_last)
+            {
+                if(state_last == "RUNNING" && state != "PAUSED" )
+                {
+        		console.log(state);
+                    $('#target_temp').html('---');
+                    updateProgress(0);
+                    $.bootstrapGrowl("<span class=\"glyphicon glyphicon-exclamation-sign\"></span> <b>Run completed</b>", {
+                    ele: 'body',
+                    type: 'success',
+                    offset: {from: 'top', amount: 250},
+                    align: 'center',
+                    width: 385,
+                    delay: 0,
+                    allow_dismiss: true,
+                    stackup_spacing: 10
+                    });
+                }
+            }
+
+            if(state=="RUNNING")
+            {
+                $("#nav_start").hide();
+                $("#nav_stop").show();
+
+                graph.live.data.push([x.runtime, x.temperature]);
+                graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ] , getOptions());
+
+                left = parseInt(x.totaltime-x.runtime);
+                eta = new Date(left * 1000).toISOString().substr(11, 8);
+
+                updateProgress(parseFloat(x.runtime)/parseFloat(x.totaltime)*100);
+                $('#state').html('<span class="glyphicon glyphicon-time" style="font-size: 22px; font-weight: normal"></span><span style="font-family: Digi; font-size: 40px;">' + eta + '</span>');
+                $('#target_temp').html(parseInt(x.target));
+                $('#cost').html(x.currency_type + parseFloat(x.cost).toFixed(2));
+            }
+            else
+            {
+                $("#nav_start").show();
+                $("#nav_stop").hide();
+                $('#state').html('<p class="ds-text">'+state+'</p>');
+            }
+
+            $('#act_temp').html(parseInt(x.temperature));
+            heat_rate = parseInt(x.heat_rate)
+            if (heat_rate > 9999) { heat_rate = 9999; }
+            if (heat_rate < -9999) { heat_rate = -9999; }
+            $('#heat_rate').html(heat_rate);
+            if (typeof x.pidstats !== 'undefined') {
+                $('#heat').html('<div class="bar" style="height:'+x.pidstats.out*70+'%;"></div>')
+                }
+            if (x.cool > 0.5) { $('#cool').addClass("ds-led-cool-active"); } else { $('#cool').removeClass("ds-led-cool-active"); }
+            if (x.air > 0.5) { $('#air').addClass("ds-led-air-active"); } else { $('#air').removeClass("ds-led-air-active"); }
+            if (x.temperature > hazardTemp()) { $('#hazard').addClass("ds-led-hazard-active"); } else { $('#hazard').removeClass("ds-led-hazard-active"); }
+            if ((x.door == "OPEN") || (x.door == "UNKNOWN")) { $('#door').addClass("ds-led-door-open"); } else { $('#door').removeClass("ds-led-door-open"); }
+
+            state_last = state;
+
+        }
+    };
+}
+
+function bindControlSocket() {
+    ws_control.onopen = function()
+    {
+
+    };
+
+    ws_control.onmessage = function(e)
+    {
+        //Data from Simulation
+        console.log ("control socket has been opened")
+        console.log (e.data);
+        x = JSON.parse(e.data);
+        graph.live.data.push([x.runtime, x.temperature]);
+        graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ] , getOptions());
+
+    }
+}
+
+function renderZoneSelector() {
+    var select = $('#zone_select');
+    if (!select.length) return;
+    select.find('option').remove().end();
+    for (var i = 0; i < available_zones.length; i++) {
+        var z = available_zones[i];
+        select.append('<option value="' + z.id + '">' + z.name + '</option>');
+    }
+    select.val(current_zone);
+}
 
 
 if(window.webkitRequestAnimationFrame) window.requestAnimationFrame = window.webkitRequestAnimationFrame;
@@ -213,6 +376,7 @@ function runTask()
     var cmd =
     {
         "cmd": "RUN",
+        "zone": current_zone,
         "profile": profiles[selected_profile]
     }
 
@@ -228,6 +392,7 @@ function runTaskSimulation()
     var cmd =
     {
         "cmd": "SIMULATE",
+        "zone": current_zone,
         "profile": profiles[selected_profile]
     }
 
@@ -241,7 +406,7 @@ function runTaskSimulation()
 
 function abortTask()
 {
-    var cmd = {"cmd": "STOP"};
+    var cmd = {"cmd": "STOP", "zone": current_zone};
     ws_control.send(JSON.stringify(cmd));
 }
 
@@ -468,127 +633,15 @@ $(document).ready(function()
     else
     {
 
-        // Status Socket ////////////////////////////////
+        renderZoneSelector();
+        $('#zone_select').on('change', function() {
+            current_zone = parseInt($(this).val(), 10);
+            connectZoneSockets();
+        });
 
-        ws_status.onopen = function()
-        {
-            console.log("Status Socket has been opened");
+        // Create zone-specific sockets now that the DOM is ready
+        connectZoneSockets();
 
-//            $.bootstrapGrowl("<span class=\"glyphicon glyphicon-exclamation-sign\"></span>Getting data from server",
-//            {
-//            ele: 'body', // which element to append to
-//            type: 'success', // (null, 'info', 'error', 'success')
-//            offset: {from: 'top', amount: 250}, // 'top', or 'bottom'
-//            align: 'center', // ('left', 'right', or 'center')
-//            width: 385, // (integer, or 'auto')
-//            delay: 2500,
-//            allow_dismiss: true,
-//            stackup_spacing: 10 // spacing between consecutively stacked growls.
-//            });
-        };
-
-        ws_status.onclose = function()
-        {
-            $.bootstrapGrowl("<span class=\"glyphicon glyphicon-exclamation-sign\"></span> <b>ERROR 1:</b><br/>Status Websocket not available", {
-            ele: 'body', // which element to append to
-            type: 'error', // (null, 'info', 'error', 'success')
-            offset: {from: 'top', amount: 250}, // 'top', or 'bottom'
-            align: 'center', // ('left', 'right', or 'center')
-            width: 385, // (integer, or 'auto')
-            delay: 5000,
-            allow_dismiss: true,
-            stackup_spacing: 10 // spacing between consecutively stacked growls.
-          });
-        };
-
-        ws_status.onmessage = function(e)
-        {
-            x = JSON.parse(e.data);
-            if (x.type == "backlog")
-            {
-                if (x.profile)
-                {
-                    selected_profile_name = x.profile.name;
-                    $.each(profiles,  function(i,v) {
-                        if(v.name == x.profile.name) {
-                            updateProfile(i);
-                            $('#e2').select2('val', i);
-                        }
-                    });
-                }
-
-                $.each(x.log, function(i,v) {
-                    graph.live.data.push([v.runtime, v.temperature]);
-                    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ] , getOptions());
-                });
-            }
-
-            if(state!="EDIT")
-            {
-                state = x.state;
-                if (state!=state_last)
-                {
-                    if(state_last == "RUNNING" && state != "PAUSED" )
-                    {
-			console.log(state);
-                        $('#target_temp').html('---');
-                        updateProgress(0);
-                        $.bootstrapGrowl("<span class=\"glyphicon glyphicon-exclamation-sign\"></span> <b>Run completed</b>", {
-                        ele: 'body', // which element to append to
-                        type: 'success', // (null, 'info', 'error', 'success')
-                        offset: {from: 'top', amount: 250}, // 'top', or 'bottom'
-                        align: 'center', // ('left', 'right', or 'center')
-                        width: 385, // (integer, or 'auto')
-                        delay: 0,
-                        allow_dismiss: true,
-                        stackup_spacing: 10 // spacing between consecutively stacked growls.
-                        });
-                    }
-                }
-
-                if(state=="RUNNING")
-                {
-                    $("#nav_start").hide();
-                    $("#nav_stop").show();
-
-                    graph.live.data.push([x.runtime, x.temperature]);
-                    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ] , getOptions());
-
-                    left = parseInt(x.totaltime-x.runtime);
-                    eta = new Date(left * 1000).toISOString().substr(11, 8);
-
-                    updateProgress(parseFloat(x.runtime)/parseFloat(x.totaltime)*100);
-                    $('#state').html('<span class="glyphicon glyphicon-time" style="font-size: 22px; font-weight: normal"></span><span style="font-family: Digi; font-size: 40px;">' + eta + '</span>');
-                    $('#target_temp').html(parseInt(x.target));
-                    $('#cost').html(x.currency_type + parseFloat(x.cost).toFixed(2));
-                  
-
-
-                }
-                else
-                {
-                    $("#nav_start").show();
-                    $("#nav_stop").hide();
-                    $('#state').html('<p class="ds-text">'+state+'</p>');
-                }
-
-                $('#act_temp').html(parseInt(x.temperature));
-                heat_rate = parseInt(x.heat_rate)
-                if (heat_rate > 9999) { heat_rate = 9999; }
-                if (heat_rate < -9999) { heat_rate = -9999; }
-                $('#heat_rate').html(heat_rate);
-                if (typeof x.pidstats !== 'undefined') {
-                    $('#heat').html('<div class="bar" style="height:'+x.pidstats.out*70+'%;"></div>')
-                    }
-                if (x.cool > 0.5) { $('#cool').addClass("ds-led-cool-active"); } else { $('#cool').removeClass("ds-led-cool-active"); }
-                if (x.air > 0.5) { $('#air').addClass("ds-led-air-active"); } else { $('#air').removeClass("ds-led-air-active"); }
-                if (x.temperature > hazardTemp()) { $('#hazard').addClass("ds-led-hazard-active"); } else { $('#hazard').removeClass("ds-led-hazard-active"); }
-                if ((x.door == "OPEN") || (x.door == "UNKNOWN")) { $('#door').addClass("ds-led-door-open"); } else { $('#door').removeClass("ds-led-door-open"); }
-
-                state_last = state;
-
-            }
-        };
 
         // Config Socket /////////////////////////////////
 
@@ -606,6 +659,15 @@ $(document).ready(function()
             time_scale_profile = x.time_scale_profile;
             kwh_rate = x.kwh_rate;
             currency_type = x.currency_type;
+
+            if (x.zones && x.zones.length) {
+                available_zones = x.zones;
+                if (current_zone >= available_zones.length) {
+                    current_zone = 0;
+                    connectZoneSockets();
+                }
+                renderZoneSelector();
+            }
 
             if (temp_scale == "c") {temp_scale_display = "C";} else {temp_scale_display = "F";}
 
@@ -629,22 +691,6 @@ $(document).ready(function()
         }
 
         // Control Socket ////////////////////////////////
-
-        ws_control.onopen = function()
-        {
-
-        };
-
-        ws_control.onmessage = function(e)
-        {
-            //Data from Simulation
-            console.log ("control socket has been opened")
-            console.log (e.data);
-            x = JSON.parse(e.data);
-            graph.live.data.push([x.runtime, x.temperature]);
-            graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ] , getOptions());
-
-        }
 
         // Storage Socket ///////////////////////////////
 

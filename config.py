@@ -277,3 +277,42 @@ kiln_profiles_directory = os.path.abspath(os.path.join(os.path.dirname( __file__
 # To prevent throttling, set throttle_percent to 100.
 throttle_below_temp = 300
 throttle_percent = 20
+
+
+########################################################################
+# Multi-zone (optional)
+#
+# To control multiple independent zones, define `zones` as a list of dicts.
+# Each zone should have its own SSR output pin and its own thermocouple
+# chip-select (CS) pin. SPI SCLK/MISO/MOSI are shared.
+#
+# If `zones` is None/empty, kiln-controller falls back to the legacy
+# single-zone config (gpio_heat + spi_cs).
+#
+# Example (Raspberry Pi / Blinka):
+#
+# zones = [
+#   {
+#     "name": "Zone 1",
+#     "gpio_heat": board.D23,
+#     "gpio_heat_invert": False,
+#     "spi_cs": board.D22,
+#     "thermocouple_offset": 0,
+#     "pid_kp": 10,
+#     "pid_ki": 80,
+#     "pid_kd": 220.8,
+#   },
+#   {
+#     "name": "Zone 2",
+#     "gpio_heat": board.D24,
+#     "gpio_heat_invert": False,
+#     "spi_cs": board.D5,
+#   },
+#   {
+#     "name": "Zone 3",
+#     "gpio_heat": board.D25,
+#     "gpio_heat_invert": False,
+#     "spi_cs": board.D6,
+#   },
+# ]
+zones = None

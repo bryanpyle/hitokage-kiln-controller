@@ -5,6 +5,7 @@ import time
 import datetime
 import busio
 import adafruit_bitbangio as bitbangio
+import argparse
 
 try:
     import board
@@ -44,11 +45,25 @@ else:
     spi = board.SPI();
     print("Hardware SPI selected for reading thermocouple")
 
-cs = DigitalInOut(config.spi_cs)
+parser = argparse.ArgumentParser(description='Test thermocouple input.')
+parser.add_argument('--zone', type=int, default=0, help='Zone id to test (0-based)')
+args = parser.parse_args()
+
+spi_cs = getattr(config, 'spi_cs', None)
+zones = getattr(config, 'zones', None)
+if zones:
+    try:
+        z = zones[args.zone] or {}
+        spi_cs = z.get('spi_cs', spi_cs)
+    except Exception:
+        pass
+
+cs = DigitalInOut(spi_cs)
 cs.switch_to_output(value=True)
 sensor = None
 
 print("\nboard: %s" % (board.board_id))
+print("zone: %d" % args.zone)
 if(config.max31855):
     import adafruit_max31855
     print("thermocouple: adafruit max31855")
@@ -56,7 +71,7 @@ if(config.max31855):
 if(config.max31856):
     import adafruit_max31856
     print("thermocouple: adafruit max31856")
-    sensor = adafruit_max31856.MAX31856(spi, cs)
+    sensor = adafruit_max31856.MAX31856(spi, cs, thermocouple_type=getattr(config, 'thermocouple_type', None))
 
 print("Degrees displayed in %s\n" % (config.temp_scale))
 

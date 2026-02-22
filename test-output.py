@@ -4,6 +4,7 @@ import adafruit_max31855
 import digitalio
 import time
 import datetime
+import argparse
 
 try:
     import board
@@ -29,14 +30,31 @@ except NotImplementedError:
 # on your configured pin change.
 ########################################################################
 
-heater = digitalio.DigitalInOut(config.gpio_heat)
+parser = argparse.ArgumentParser(description='Test SSR output pin.')
+parser.add_argument('--zone', type=int, default=0, help='Zone id to test (0-based)')
+args = parser.parse_args()
+
+gpio_heat = getattr(config, 'gpio_heat', None)
+gpio_heat_invert = getattr(config, 'gpio_heat_invert', False)
+
+zones = getattr(config, 'zones', None)
+if zones:
+    try:
+        z = zones[args.zone] or {}
+        gpio_heat = z.get('gpio_heat', gpio_heat)
+        gpio_heat_invert = z.get('gpio_heat_invert', gpio_heat_invert)
+    except Exception:
+        pass
+
+heater = digitalio.DigitalInOut(gpio_heat)
 heater.direction = digitalio.Direction.OUTPUT
-off = config.gpio_heat_invert
+off = gpio_heat_invert
 on = not off
 
 print("\nboard: %s" % (board.board_id))
-print("heater configured as config.gpio_heat = %s BCM pin\n" % (config.gpio_heat))
-print("heater output pin configured as invert = %r\n" % (config.gpio_heat_invert))
+print("zone: %d" % args.zone)
+print("heater configured as gpio_heat = %s BCM pin\n" % (gpio_heat))
+print("heater output pin configured as invert = %r\n" % (gpio_heat_invert))
 
 while True:
     heater.value = on

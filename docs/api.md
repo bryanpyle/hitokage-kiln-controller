@@ -2,6 +2,10 @@ start a run
 
     curl -d '{"cmd":"run", "profile":"cone-05-long-bisque"}' -H "Content-Type: application/json" -X POST http://0.0.0.0:8081/api
 
+start a run (specific zone)
+
+    curl -d '{"cmd":"run", "zone": 2, "profile":"cone-05-long-bisque"}' -H "Content-Type: application/json" -X POST http://0.0.0.0:8081/api
+
 skip the first part of a run
 restart the kiln on a specific profile and start at minute 60
 
@@ -19,10 +23,22 @@ stats for currently running schedule
 
     curl -X GET http://0.0.0.0:8081/api/stats
 
+stats for a specific zone
+
+    curl -X GET 'http://0.0.0.0:8081/api/stats?zone=1'
+
 pause a run (maintain current temperature until resume)
 
     curl -d '{"cmd":"pause"}' -H "Content-Type: application/json" -X POST http://0.0.0.0:8081/api
 
+pause a run (specific zone)
+
+    curl -d '{"cmd":"pause", "zone": 1}' -H "Content-Type: application/json" -X POST http://0.0.0.0:8081/api
+
 resume a paused run
     
     curl -d '{"cmd":"resume"}' -H "Content-Type: application/json" -X POST http://0.0.0.0:8081/api
+
+resume a paused run (specific zone)
+
+    curl -d '{"cmd":"resume", "zone": 1}' -H "Content-Type: application/json" -X POST http://0.0.0.0:8081/api

@@ -12,6 +12,10 @@ import statistics
 
 log = logging.getLogger(__name__)
 
+# When running multiple zones, each thermocouple reader runs in its own thread.
+# The SPI bus is shared, so serialize raw reads to avoid contention.
+SPI_LOCK = threading.Lock()
+
 class DupFilter(object):
     def __init__(self):
         self.msgs = set()
@@ -38,11 +42,16 @@ class Output(object):
         config.gpio_heat
         config.gpio_heat_invert
     '''
-    def __init__(self):
+    def __init__(self, gpio_heat=None, gpio_heat_invert=None):
         self.active = False
-        self.heater = digitalio.DigitalInOut(config.gpio_heat) 
+        if gpio_heat is None:
+            gpio_heat = config.gpio_heat
+        if gpio_heat_invert is None:
+            gpio_heat_invert = config.gpio_heat_invert
+
+        self.heater = digitalio.DigitalInOut(gpio_heat)
         self.heater.direction = digitalio.Direction.OUTPUT 
-        self.off = config.gpio_heat_invert
+        self.off = gpio_heat_invert
         self.on = not self.off
 
     def heat(self,sleepfor):
@@ -68,8 +77,9 @@ class RealBoard(Board):
     Any blinka board that supports SPI can be used. The
     board is automatically detected by blinka.
     '''
-    def __init__(self):
+    def __init__(self, spi_cs=None):
         self.name = None
+        self.spi_cs = spi_cs
         self.load_libs()
         self.temp_sensor = self.choose_tempsensor()
         Board.__init__(self) 
@@ -80,9 +90,9 @@ class RealBoard(Board):
 
     def choose_tempsensor(self):
         if config.max31855:
-            return Max31855()
+            return Max31855(spi_cs=self.spi_cs)
         if config.max31856:
-            return Max31856()
+            return Max31856(spi_cs=self.spi_cs)
 
 class SimulatedBoard(Board):
     '''Simulated board used during simulations.
@@ -117,12 +127,14 @@ class TempSensorReal(TempSensor):
        inputs
            config.temperature_average_samples 
     '''
-    def __init__(self):
+    def __init__(self, spi_cs=None):
         TempSensor.__init__(self)
         self.sleeptime = self.time_step / float(config.temperature_average_samples)
         self.temptracker = TempTracker() 
         self.spi_setup()
-        self.cs = digitalio.DigitalInOut(config.spi_cs)
+        if spi_cs is None:
+            spi_cs = config.spi_cs
+        self.cs = digitalio.DigitalInOut(spi_cs)
 
     def spi_setup(self):
         if(hasattr(config,'spi_sclk') and
@@ -138,7 +150,8 @@ class TempSensorReal(TempSensor):
     def get_temperature(self):
         '''read temp from tc and convert if needed'''
         try:
-            temp = self.raw_temp() # raw_temp provided by subclasses
+            with SPI_LOCK:
+                temp = self.raw_temp() # raw_temp provided by subclasses
             if config.temp_scale.lower() == "f":
                 temp = (temp*9/5)+32
             self.status.good()
@@ -213,8 +226,8 @@ class ThermocoupleTracker(object):
 
 class Max31855(TempSensorReal):
     '''each subclass expected to handle errors and get temperature'''
-    def __init__(self):
-        TempSensorReal.__init__(self)
+    def __init__(self, spi_cs=None):
+        TempSensorReal.__init__(self, spi_cs=spi_cs)
         log.info("thermocouple MAX31855")
         import adafruit_max31855
         self.thermocouple = adafruit_max31855.MAX31855(self.spi, self.cs)
@@ -300,8 +313,8 @@ class Max31856_Error(ThermocoupleError):
 
 class Max31856(TempSensorReal):
     '''each subclass expected to handle errors and get temperature'''
-    def __init__(self):
-        TempSensorReal.__init__(self)
+    def __init__(self, spi_cs=None):
+        TempSensorReal.__init__(self, spi_cs=spi_cs)
         log.info("thermocouple MAX31856")
         import adafruit_max31856
         self.thermocouple = adafruit_max31856.MAX31856(self.spi,self.cs,
@@ -326,11 +339,36 @@ class Max31856(TempSensorReal):
 class Oven(threading.Thread):
     '''parent oven class. this has all the common code
        for either a real or simulated oven'''
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        zone_id=0,
+        zone_name=None,
+        pid_kp=None,
+        pid_ki=None,
+        pid_kd=None,
+        thermocouple_offset=None,
+        automatic_restart_state_file=None,
+    ):
         threading.Thread.__init__(self)
         self.daemon = True
         self.temperature = 0
         self.time_step = config.sensor_time_wait
+
+        self.zone_id = zone_id
+        self.zone_name = zone_name or f"Zone {zone_id + 1}"
+        self.pid_kp = config.pid_kp if pid_kp is None else pid_kp
+        self.pid_ki = config.pid_ki if pid_ki is None else pid_ki
+        self.pid_kd = config.pid_kd if pid_kd is None else pid_kd
+        self.thermocouple_offset = (
+            config.thermocouple_offset if thermocouple_offset is None else thermocouple_offset
+        )
+        self.automatic_restart_state_file = (
+            config.automatic_restart_state_file
+            if automatic_restart_state_file is None
+            else automatic_restart_state_file
+        )
+
         self.reset()
 
     def reset(self):
@@ -344,7 +382,7 @@ class Oven(threading.Thread):
         self.heat = 0
         self.heat_rate = 0
         self.heat_rate_temps = []
-        self.pid = PID(ki=config.pid_ki, kd=config.pid_kd, kp=config.pid_kp)
+        self.pid = PID(ki=self.pid_ki, kd=self.pid_kd, kp=self.pid_kp)
         self.catching_up = False
 
     @staticmethod
@@ -405,8 +443,7 @@ class Oven(threading.Thread):
         '''shift the whole schedule forward in time by one time_step
         to wait for the kiln to catch up'''
         if config.kiln_must_catch_up == True:
-            temp = self.board.temp_sensor.temperature() + \
-                config.thermocouple_offset
+            temp = self.board.temp_sensor.temperature() + self.thermocouple_offset
             # kiln too cold, wait for it to heat up
             if self.target - temp > config.pid_control_window:
                 log.info("kiln must catch up, too cold, shifting schedule")
@@ -434,7 +471,7 @@ class Oven(threading.Thread):
 
     def reset_if_emergency(self):
         '''reset if the temperature is way TOO HOT, or other critical errors detected'''
-        if (self.board.temp_sensor.temperature() + config.thermocouple_offset >=
+        if (self.board.temp_sensor.temperature() + self.thermocouple_offset >=
             config.emergency_shutoff_temp):
             log.info("emergency!!! temperature too high")
             if config.ignore_temp_too_high == False:
@@ -461,7 +498,7 @@ class Oven(threading.Thread):
     def get_state(self):
         temp = 0
         try:
-            temp = self.board.temp_sensor.temperature() + config.thermocouple_offset
+            temp = self.board.temp_sensor.temperature() + self.thermocouple_offset
         except AttributeError as error:
             # this happens at start-up with a simulated oven
             temp = 0
@@ -470,6 +507,8 @@ class Oven(threading.Thread):
         self.set_heat_rate(self.runtime,temp)
 
         state = {
+            'zone': self.zone_id,
+            'zone_name': self.zone_name,
             'cost': self.cost,
             'runtime': self.runtime,
             'temperature': temp,
@@ -487,7 +526,7 @@ class Oven(threading.Thread):
         return state
 
     def save_state(self):
-        with open(config.automatic_restart_state_file, 'w', encoding='utf-8') as f:
+        with open(self.automatic_restart_state_file, 'w', encoding='utf-8') as f:
             json.dump(self.get_state(), f, ensure_ascii=False, indent=4)
 
     def state_file_is_old(self):
@@ -495,8 +534,8 @@ class Oven(threading.Thread):
                    False if younger
                    True if state file cannot be opened or does not exist
         '''
-        if os.path.isfile(config.automatic_restart_state_file):
-            state_age = os.path.getmtime(config.automatic_restart_state_file)
+        if os.path.isfile(self.automatic_restart_state_file):
+            state_age = os.path.getmtime(self.automatic_restart_state_file)
             now = time.time()
             minutes = (now - state_age)/60
             if(minutes <= config.automatic_restart_window):
@@ -525,7 +564,7 @@ class Oven(threading.Thread):
         return True
 
     def automatic_restart(self):
-        with open(config.automatic_restart_state_file) as infile: d = json.load(infile)
+        with open(self.automatic_restart_state_file) as infile: d = json.load(infile)
         startat = d["runtime"]/60
         filename = "%s.json" % (d["profile"])
         profile_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'storage','profiles',filename))
@@ -571,7 +610,17 @@ class Oven(threading.Thread):
 
 class SimulatedOven(Oven):
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        zone_id=0,
+        zone_name=None,
+        pid_kp=None,
+        pid_ki=None,
+        pid_kd=None,
+        thermocouple_offset=None,
+        automatic_restart_state_file=None,
+    ):
         self.board = SimulatedBoard()
         self.t_env = config.sim_t_env
         self.c_heat = config.sim_c_heat
@@ -586,7 +635,15 @@ class SimulatedOven(Oven):
         self.t = config.sim_t_env  # deg C or F temp of oven
         self.t_h = self.t_env #deg C temp of heating element
 
-        super().__init__()
+        super().__init__(
+            zone_id=zone_id,
+            zone_name=zone_name,
+            pid_kp=pid_kp,
+            pid_ki=pid_ki,
+            pid_kd=pid_kd,
+            thermocouple_offset=thermocouple_offset,
+            automatic_restart_state_file=automatic_restart_state_file,
+        )
 
         self.start_time = self.get_start_time();
 
@@ -634,7 +691,7 @@ class SimulatedOven(Oven):
         now_simulator = self.start_time + datetime.timedelta(milliseconds = self.runtime * 1000)
         pid = self.pid.compute(self.target,
                                self.board.temp_sensor.temperature() +
-                               config.thermocouple_offset, now_simulator)
+                               self.thermocouple_offset, now_simulator)
 
         heat_on = float(self.time_step * pid)
         heat_off = float(self.time_step * (1 - pid))
@@ -679,13 +736,32 @@ class SimulatedOven(Oven):
 
 class RealOven(Oven):
 
-    def __init__(self):
-        self.board = RealBoard()
-        self.output = Output()
-        self.reset()
+    def __init__(
+        self,
+        *,
+        zone_id=0,
+        zone_name=None,
+        spi_cs=None,
+        gpio_heat=None,
+        gpio_heat_invert=None,
+        pid_kp=None,
+        pid_ki=None,
+        pid_kd=None,
+        thermocouple_offset=None,
+        automatic_restart_state_file=None,
+    ):
+        self.board = RealBoard(spi_cs=spi_cs)
+        self.output = Output(gpio_heat=gpio_heat, gpio_heat_invert=gpio_heat_invert)
 
-        # call parent init
-        Oven.__init__(self)
+        super().__init__(
+            zone_id=zone_id,
+            zone_name=zone_name,
+            pid_kp=pid_kp,
+            pid_ki=pid_ki,
+            pid_kd=pid_kd,
+            thermocouple_offset=thermocouple_offset,
+            automatic_restart_state_file=automatic_restart_state_file,
+        )
 
         # start thread
         self.start()
@@ -697,7 +773,7 @@ class RealOven(Oven):
     def heat_then_cool(self):
         pid = self.pid.compute(self.target,
                                self.board.temp_sensor.temperature() +
-                               config.thermocouple_offset, datetime.datetime.now())
+                               self.thermocouple_offset, datetime.datetime.now())
 
         heat_on = float(self.time_step * pid)
         heat_off = float(self.time_step * (1 - pid))
