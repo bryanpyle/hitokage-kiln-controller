@@ -74,6 +74,25 @@ Download [Raspberry PI OS](https://www.raspberrypi.org/software/). Use Rasberry 
     $ source venv/bin/activate
     $ pip install -r requirements.txt
 
+### macOS / desktop development install
+
+For local development on macOS (or other non-Raspberry Pi machines), use the dev requirements file:
+
+    $ python3 -m venv venv
+    $ source venv/bin/activate
+    $ pip install -r requirements-dev.txt
+
+This avoids the Raspberry Pi-only `RPi.GPIO` dependency while still installing the libraries needed to run/simulate the app.
+
+### Makefile shortcuts
+
+If you have `make` installed, you can use one-command shortcuts from the repo root:
+
+    $ make dev-install     # desktop/macOS dependencies
+    $ make pi-install      # Raspberry Pi dependencies
+    $ make verify-imports  # quick import smoke test
+    $ make run             # start kiln-controller.py
+
 *Note: The above steps work on ubuntu if you prefer*
 
 ### Raspberry PI deployment

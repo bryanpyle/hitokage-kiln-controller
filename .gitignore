@@ -10,3 +10,6 @@ thumbs.db
 .idea/*
 state.json
 venv/*
+.venv/*
+
+**/*.code-workspace
