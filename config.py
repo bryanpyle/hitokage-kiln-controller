@@ -291,28 +291,28 @@ throttle_percent = 20
 #
 # Example (Raspberry Pi / Blinka):
 #
-# zones = [
-#   {
-#     "name": "Zone 1",
-#     "gpio_heat": board.D23,
-#     "gpio_heat_invert": False,
-#     "spi_cs": board.D22,
-#     "thermocouple_offset": 0,
-#     "pid_kp": 10,
-#     "pid_ki": 80,
-#     "pid_kd": 220.8,
-#   },
-#   {
-#     "name": "Zone 2",
-#     "gpio_heat": board.D24,
-#     "gpio_heat_invert": False,
-#     "spi_cs": board.D5,
-#   },
-#   {
-#     "name": "Zone 3",
-#     "gpio_heat": board.D25,
-#     "gpio_heat_invert": False,
-#     "spi_cs": board.D6,
-#   },
-# ]
-zones = None
+zones = [
+  {
+    "name": "Zone 1 (Bottom)",
+    "gpio_heat": board.D23,
+    "gpio_heat_invert": False,
+    "spi_cs": board.D22,
+    "thermocouple_offset": 0,
+    "pid_kp": 10,
+    "pid_ki": 80,
+    "pid_kd": 220.8,
+  },
+  {
+    "name": "Zone 2 (Middle)",
+    "gpio_heat": board.D24,
+    "gpio_heat_invert": False,
+    "spi_cs": board.D5,
+  },
+  {
+    "name": "Zone 3 (Top)",
+    "gpio_heat": board.D25,
+    "gpio_heat_invert": False,
+    "spi_cs": board.D6,
+  },
+]
+# zones = None
