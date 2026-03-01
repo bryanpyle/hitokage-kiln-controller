@@ -90,8 +90,30 @@ try:
     spi_mosi  = board.D10    #spi Microcomputer Out Serial In (not connected) 
     gpio_heat = board.D23    #output that controls relay
     gpio_heat_invert = False #invert the output state
+    
 except (NotImplementedError,AttributeError):
     print("not running on blinka recognized board, probably a simulation")
+    # Create a mock board object for simulation/development
+    class MockBoard:
+        def __init__(self):
+            self.D5 = "GPIO5"
+            self.D6 = "GPIO6"
+            self.D10 = "GPIO10"
+            self.D17 = "GPIO17"
+            self.D22 = "GPIO22"
+            self.D23 = "GPIO23"
+            self.D24 = "GPIO24"
+            self.D25 = "GPIO25"
+            self.D27 = "GPIO27"
+    
+    board = MockBoard()
+    spi_sclk  = board.D17    #spi clock
+    spi_miso  = board.D27    #spi Microcomputer In Serial Out
+    spi_cs    = board.D22    #spi Chip Select
+    spi_mosi  = board.D10    #spi Microcomputer Out Serial In (not connected) 
+    gpio_heat = board.D23    #output that controls relay
+    gpio_heat_invert = False #invert the output state
+    zones = None
 
 #######################################
 ### Thermocouple breakout boards
@@ -279,6 +301,8 @@ throttle_below_temp = 300
 throttle_percent = 20
 
 
+
+
 ########################################################################
 # Multi-zone (optional)
 #
@@ -291,28 +315,28 @@ throttle_percent = 20
 #
 # Example (Raspberry Pi / Blinka):
 #
-zones = [
-  {
-    "name": "Zone 1 (Bottom)",
-    "gpio_heat": board.D23,
-    "gpio_heat_invert": False,
-    "spi_cs": board.D22,
-    "thermocouple_offset": 0,
-    "pid_kp": 10,
-    "pid_ki": 80,
-    "pid_kd": 220.8,
-  },
-  {
-    "name": "Zone 2 (Middle)",
-    "gpio_heat": board.D24,
-    "gpio_heat_invert": False,
-    "spi_cs": board.D5,
-  },
-  {
-    "name": "Zone 3 (Top)",
-    "gpio_heat": board.D25,
-    "gpio_heat_invert": False,
-    "spi_cs": board.D6,
-  },
-]
 # zones = None
+zones = [
+    {
+        "name": "Zone 3 (Top)",
+        "gpio_heat": board.D25,
+        "gpio_heat_invert": False,
+        "spi_cs": board.D6,
+    },
+    {
+        "name": "Zone 2 (Middle)",
+        "gpio_heat": board.D24,
+        "gpio_heat_invert": False,
+        "spi_cs": board.D5,
+    },
+    {
+        "name": "Zone 1 (Bottom)",
+        "gpio_heat": board.D23,
+        "gpio_heat_invert": False,
+        "spi_cs": board.D22,
+        "thermocouple_offset": 0,
+        "pid_kp": 10,
+        "pid_ki": 80,
+        "pid_kd": 220.8,
+    },
+]
