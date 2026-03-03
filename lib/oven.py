@@ -504,6 +504,10 @@ class Oven(threading.Thread):
             temp = 0
             pass
 
+        # Update runtime to get current elapsed time
+        if self.state == "RUNNING":
+            self.update_runtime()
+
         self.set_heat_rate(self.runtime,temp)
 
         state = {

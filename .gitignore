@@ -13,3 +13,5 @@ venv/*
 .venv/*
 
 **/*.code-workspace
+
+state*.json
