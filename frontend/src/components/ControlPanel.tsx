@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Divider from "@mui/material/Divider";
@@ -50,6 +50,14 @@ export default function ControlPanel({
   const isRunning = kilnState === "RUNNING";
   const isPaused = kilnState === "PAUSED";
   const isIdle = kilnState === "IDLE";
+
+  // Sync the dropdown to the currently running profile (e.g. after a page
+  // refresh when the kiln is already mid-run).
+  useEffect(() => {
+    if (anyZoneState?.profile && anyZoneState.state !== "IDLE") {
+      setSelectedProfile(anyZoneState.profile);
+    }
+  }, [anyZoneState?.profile, anyZoneState?.state]);
 
   // Progress + timing from the representative zone (same profile across all zones)
   const runtime = anyZoneState?.runtime ?? 0;

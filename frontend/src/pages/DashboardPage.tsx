@@ -11,6 +11,7 @@ import { fetchConfig, fetchProfiles } from "../api/http";
 import {
   useAllZonesWebSocket,
   buildMultiZoneChartData,
+  profileToSchedulePoints,
 } from "../api/useOvenWebSocket";
 import type { FiringProfile, KilnConfig, OvenState } from "../types";
 
@@ -48,7 +49,19 @@ export default function DashboardPage() {
     null;
 
   // Aggregated chart data across all zones
-  const { chartData, scheduleData } = buildMultiZoneChartData(zoneData, zoneIds);
+  const { chartData, scheduleData: wsScheduleData } = buildMultiZoneChartData(zoneData, zoneIds);
+
+  // If the WS backlog hasn't delivered the active profile yet (e.g. run was
+  // started from the UI without a page reload), fall back to the HTTP-fetched
+  // profiles list using the profile name already present in OvenState.
+  const runningProfileName = anyZoneState?.profile ?? null;
+  const scheduleData = wsScheduleData.length > 0
+    ? wsScheduleData
+    : (() => {
+        if (!runningProfileName) return [];
+        const found = profiles.find((p) => p.name === runningProfileName);
+        return found ? profileToSchedulePoints(found) : [];
+      })();
 
   // Per-zone PID stats for the combined table
   const pidZones = config.zones.map((z) => ({
