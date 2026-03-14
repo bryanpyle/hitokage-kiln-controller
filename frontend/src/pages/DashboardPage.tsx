@@ -56,6 +56,11 @@ export default function DashboardPage() {
     stats: zoneData[z.id]?.state?.pidstats ?? null,
   }));
 
+  // All live zone states for aggregate cost calculation
+  const allZoneStates = zoneIds
+    .map((id) => zoneData[id]?.state)
+    .filter((s): s is OvenState => s !== null && s !== undefined);
+
   const anyDisconnected = zoneIds.some((id) => !zoneData[id]?.connected);
 
   return (
@@ -71,6 +76,7 @@ export default function DashboardPage() {
       <ControlPanel
         zoneIds={zoneIds}
         anyZoneState={anyZoneState}
+        allZoneStates={allZoneStates}
         profiles={profiles}
       />
 

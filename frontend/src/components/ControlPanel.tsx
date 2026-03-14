@@ -1,8 +1,10 @@
 import { useState } from "react";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
+import Divider from "@mui/material/Divider";
 import FormControl from "@mui/material/FormControl";
 import InputLabel from "@mui/material/InputLabel";
+import LinearProgress from "@mui/material/LinearProgress";
 import MenuItem from "@mui/material/MenuItem";
 import Paper from "@mui/material/Paper";
 import Select from "@mui/material/Select";
@@ -17,14 +19,26 @@ import type { FiringProfile, OvenState } from "../types";
 interface ControlPanelProps {
   /** All zone IDs — the same command is broadcast to every zone. */
   zoneIds: number[];
-  /** Representative oven state (used to derive button enable/disable). */
+  /** Representative oven state (used to derive button enable/disable + profile info). */
   anyZoneState: OvenState | null;
+  /** All zone states — used to compute aggregate run cost. */
+  allZoneStates: OvenState[];
   profiles: FiringProfile[];
+}
+
+function formatRuntime(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
 }
 
 export default function ControlPanel({
   zoneIds,
   anyZoneState,
+  allZoneStates,
   profiles,
 }: ControlPanelProps) {
   const [selectedProfile, setSelectedProfile] = useState("");
@@ -32,17 +46,26 @@ export default function ControlPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  // Derive a combined state: RUNNING > PAUSED > IDLE
   const kilnState = anyZoneState?.state ?? "IDLE";
   const isRunning = kilnState === "RUNNING";
   const isPaused = kilnState === "PAUSED";
   const isIdle = kilnState === "IDLE";
 
+  // Progress + timing from the representative zone (same profile across all zones)
+  const runtime = anyZoneState?.runtime ?? 0;
+  const totaltime = anyZoneState?.totaltime ?? 0;
+  const progress = totaltime > 0 ? Math.min(100, (runtime / totaltime) * 100) : 0;
+  const profileName = anyZoneState?.profile ?? null;
+  const catchingUp = anyZoneState?.catching_up ?? false;
+
+  // Aggregate run cost across all zones
+  const totalCost = allZoneStates.reduce((sum, s) => sum + (s?.cost ?? 0), 0);
+  const currencyType = anyZoneState?.currency_type ?? "$";
+
   async function dispatch(cmd: "run" | "stop" | "pause" | "resume") {
     setError("");
     setBusy(true);
     try {
-      // Broadcast the same command to every zone in parallel
       await Promise.all(
         zoneIds.map((zone) =>
           sendControl({
@@ -62,12 +85,8 @@ export default function ControlPanel({
 
   return (
     <Paper sx={{ p: 2 }}>
-      <Typography variant="h6" gutterBottom>
-        Control — All Zones
-      </Typography>
-
+      {/* ── Top row: controls ── */}
       <Box display="flex" gap={2} flexWrap="wrap" alignItems="center">
-        {/* Profile selector */}
         <FormControl size="small" sx={{ minWidth: 240, flex: 1 }}>
           <InputLabel id="profile-label-all">Firing Profile</InputLabel>
           <Select
@@ -96,7 +115,6 @@ export default function ControlPanel({
           sx={{ width: 130 }}
         />
 
-        {/* Action buttons */}
         <Box display="flex" gap={1} flexWrap="wrap">
           <Button
             variant="contained"
@@ -107,7 +125,6 @@ export default function ControlPanel({
           >
             Run
           </Button>
-
           <Button
             variant="outlined"
             startIcon={<PauseIcon />}
@@ -116,7 +133,6 @@ export default function ControlPanel({
           >
             Pause
           </Button>
-
           <Button
             variant="outlined"
             color="success"
@@ -126,7 +142,6 @@ export default function ControlPanel({
           >
             Resume
           </Button>
-
           <Button
             variant="contained"
             color="error"
@@ -140,9 +155,58 @@ export default function ControlPanel({
       </Box>
 
       {error && (
-        <Typography color="error" variant="caption" sx={{ mt: 1, display: "block" }}>
+        <Typography color="error" variant="caption" sx={{ mt: 0.5, display: "block" }}>
           {error}
         </Typography>
+      )}
+
+      {/* ── Profile run status (hidden when IDLE) ── */}
+      {!isIdle && profileName && (
+        <>
+          <Divider sx={{ my: 1.5 }} />
+          <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
+            {/* Profile name + progress */}
+            <Box flex={1} minWidth={200}>
+              <Box display="flex" justifyContent="space-between" mb={0.5}>
+                <Typography variant="body2" color="text.secondary">
+                  {profileName}
+                  {catchingUp && (
+                    <Typography component="span" variant="caption" color="warning.main" sx={{ ml: 1 }}>
+                      ⚠ catching up
+                    </Typography>
+                  )}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {progress.toFixed(0)}%
+                </Typography>
+              </Box>
+              <LinearProgress
+                variant="determinate"
+                value={progress}
+                sx={{ height: 8, borderRadius: 4 }}
+                color={catchingUp ? "warning" : "success"}
+              />
+              <Box display="flex" justifyContent="space-between" mt={0.5}>
+                <Typography variant="caption" color="text.secondary">
+                  {formatRuntime(runtime)} elapsed
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {formatRuntime(totaltime - runtime)} remaining
+                </Typography>
+              </Box>
+            </Box>
+
+            {/* Aggregate cost */}
+            <Box textAlign="right" sx={{ whiteSpace: "nowrap" }}>
+              <Typography variant="caption" color="text.secondary" display="block">
+                Total Run Cost
+              </Typography>
+              <Typography variant="h6" fontWeight={700} color="text.primary">
+                {currencyType}{totalCost.toFixed(3)}
+              </Typography>
+            </Box>
+          </Box>
+        </>
       )}
     </Paper>
   );
