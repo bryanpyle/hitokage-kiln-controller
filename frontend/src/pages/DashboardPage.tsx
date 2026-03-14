@@ -8,69 +8,11 @@ import FiringChart from "../components/FiringChart";
 import PidStatsTable from "../components/PidStatsTable";
 import ZoneCard from "../components/ZoneCard";
 import { fetchConfig, fetchProfiles } from "../api/http";
-import { useOvenWebSocket } from "../api/useOvenWebSocket";
-import type { FiringProfile, KilnConfig } from "../types";
-
-/** Single zone panel: status card + chart + control */
-function ZonePanel({
-  zoneId,
-  profiles,
-  config,
-}: {
-  zoneId: number;
-  profiles: FiringProfile[];
-  config: KilnConfig;
-}) {
-  const { state, chartData, scheduleData, connected } =
-    useOvenWebSocket(zoneId);
-
-  return (
-    <Box>
-      {/* Connection indicator */}
-      {!connected && (
-        <Typography variant="caption" color="warning.main" sx={{ mb: 1, display: "block" }}>
-          ⚠ Connecting to zone {zoneId}…
-        </Typography>
-      )}
-
-      <Grid container spacing={2}>
-        {/* Zone status card */}
-        <Grid size={{ xs: 12, md: 4 }}>
-          {state ? (
-            <ZoneCard state={state} tempScale={config.temp_scale} />
-          ) : (
-            <Skeleton variant="rectangular" height={220} sx={{ borderRadius: 2 }} />
-          )}
-        </Grid>
-
-        {/* Control panel */}
-        <Grid size={{ xs: 12, md: 8 }}>
-          <ControlPanel
-            zone={zoneId}
-            ovenState={state}
-            profiles={profiles}
-          />
-        </Grid>
-
-        {/* Firing chart — full width */}
-        <Grid size={12}>
-          <FiringChart
-            chartData={chartData}
-            scheduleData={scheduleData}
-            tempScale={config.temp_scale}
-          />
-        </Grid>
-
-        {/* PID stats */}
-        {state?.pidstats && Object.keys(state.pidstats).length > 0 && (
-          <Grid size={{ xs: 12, md: 5 }}>
-            <PidStatsTable stats={state.pidstats} />
-          </Grid>
-        )}
-      </Grid>
-    </Box>
-  );
-}
+import {
+  useAllZonesWebSocket,
+  buildMultiZoneChartData,
+} from "../api/useOvenWebSocket";
+import type { FiringProfile, KilnConfig, OvenState } from "../types";
 
 export default function DashboardPage() {
   const [config, setConfig] = useState<KilnConfig | null>(null);
@@ -81,37 +23,83 @@ export default function DashboardPage() {
     fetchProfiles().then(setProfiles).catch(console.error);
   }, []);
 
+  // Derive zone IDs from config (empty until loaded)
+  const zoneIds = config?.zones.map((z) => z.id) ?? [];
+
+  // Single hook manages all zone WebSocket connections
+  const zoneData = useAllZonesWebSocket(zoneIds);
+
   if (!config) {
     return (
       <Box>
-        <Skeleton height={60} sx={{ mb: 2 }} />
-        <Skeleton variant="rectangular" height={300} />
+        <Skeleton height={80} sx={{ mb: 2, borderRadius: 2 }} />
+        <Skeleton variant="rectangular" height={200} sx={{ mb: 2, borderRadius: 2 }} />
+        <Skeleton variant="rectangular" height={400} sx={{ borderRadius: 2 }} />
       </Box>
     );
   }
 
-  return (
-    <Box>
-      <Typography variant="h5" gutterBottom>
-        Dashboard
-      </Typography>
+  // Representative state for control panel button logic (first non-IDLE zone wins)
+  const anyZoneState: OvenState | null =
+    zoneIds
+      .map((id) => zoneData[id]?.state)
+      .find((s): s is OvenState => !!s && s.state !== "IDLE") ??
+    zoneData[zoneIds[0]]?.state ??
+    null;
 
-      <Box display="flex" flexDirection="column" gap={4}>
-        {config.zones.map((zone) => (
-          <Box key={zone.id}>
-            {config.zones.length > 1 && (
-              <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-                {zone.name}
-              </Typography>
-            )}
-            <ZonePanel
-              zoneId={zone.id}
-              profiles={profiles}
-              config={config}
-            />
-          </Box>
-        ))}
-      </Box>
+  // Aggregated chart data across all zones
+  const { chartData, scheduleData } = buildMultiZoneChartData(zoneData, zoneIds);
+
+  // Per-zone PID stats for the combined table
+  const pidZones = config.zones.map((z) => ({
+    zoneName: z.name,
+    stats: zoneData[z.id]?.state?.pidstats ?? null,
+  }));
+
+  const anyDisconnected = zoneIds.some((id) => !zoneData[id]?.connected);
+
+  return (
+    <Box display="flex" flexDirection="column" gap={2}>
+      {/* ── Connection warning ── */}
+      {anyDisconnected && (
+        <Typography variant="caption" color="warning.main">
+          ⚠ Reconnecting to one or more zones…
+        </Typography>
+      )}
+
+      {/* ── 1. Control panel (full width, top) ── */}
+      <ControlPanel
+        zoneIds={zoneIds}
+        anyZoneState={anyZoneState}
+        profiles={profiles}
+      />
+
+      {/* ── 2. Zone status cards (side by side) ── */}
+      <Grid container spacing={2}>
+        {config.zones.map((zone) => {
+          const zd = zoneData[zone.id];
+          return (
+            <Grid key={zone.id} size={{ xs: 12, sm: 6, lg: 4 }}>
+              {zd?.state ? (
+                <ZoneCard state={zd.state} tempScale={config.temp_scale} />
+              ) : (
+                <Skeleton variant="rectangular" height={240} sx={{ borderRadius: 2 }} />
+              )}
+            </Grid>
+          );
+        })}
+      </Grid>
+
+      {/* ── 3. Unified firing chart (all zones) ── */}
+      <FiringChart
+        chartData={chartData}
+        scheduleData={scheduleData}
+        zones={config.zones}
+        tempScale={config.temp_scale}
+      />
+
+      {/* ── 4. Combined PID stats table ── */}
+      <PidStatsTable zones={pidZones} />
     </Box>
   );
 }

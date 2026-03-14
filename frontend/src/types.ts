@@ -76,12 +76,16 @@ export interface KilnConfig {
   zones: ZoneConfig[];
 }
 
-/** A chart data point used by Recharts. */
+/** A chart data point used by Recharts.
+ * `time` is runtime in minutes.
+ * `actual_N` holds the measured temperature for zone N.
+ * `target` is the shared PID target (same profile for all zones).
+ * `schedule` is the look-ahead profile curve.
+ */
 export interface ChartPoint {
-  /** runtime in minutes */
   time: number;
-  actual?: number;
   target?: number;
-  /** schedule look-ahead points (profile curve) use this key */
   schedule?: number;
+  /** zone actual temperatures: actual_0, actual_1, actual_2, … */
+  [key: string]: number | undefined;
 }
