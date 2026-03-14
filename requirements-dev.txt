@@ -1,10 +1,15 @@
 setuptools<81  # packaging/build utilities; <81 keeps pkg_resources for blinka compatibility
 greenlet  # lightweight coroutines used by gevent
-bottle  # lightweight web framework for HTTP routes
-gevent  # async WSGI server/event loop
-gevent-websocket  # websocket handler integration for gevent
+bottle  # lightweight web framework for HTTP routes (legacy; kept for kiln-logger/watcher scripts)
+gevent  # async WSGI server/event loop (legacy)
+gevent-websocket  # websocket handler integration for gevent (legacy)
 websocket-client  # client websocket support (used by logger scripts)
 requests  # HTTP client for watcher/utility scripts
+
+# ── FastAPI backend (new) ─────────────────────────────────────────────────────
+fastapi>=0.115.0          # Modern async web framework
+uvicorn[standard]>=0.32.0 # ASGI server with uvloop + websockets
+pydantic>=2.9.0           # Data validation (bundled with FastAPI)
 
 # CircuitPython/Blinka stack for imports like board/digitalio/busio on non-RPi dev machines
 adafruit-blinka  # board compatibility layer used by CircuitPython libraries
