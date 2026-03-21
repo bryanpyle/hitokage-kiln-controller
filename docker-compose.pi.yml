@@ -1,0 +1,52 @@
+# docker-compose.pi.yml — Raspberry Pi HARDWARE overlay
+#
+# Merges with docker-compose.yml to enable real kiln hardware:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.pi.yml up --build
+#
+# Aliases (defined in the Makefile):
+#   make docker-up-pi
+#   make docker-build-pi
+#
+# Prerequisites on the Pi:
+#   - SPI enabled:  sudo raspi-config → Interface Options → SPI → Enable
+#   - SPI kernel modules loaded: lsmod | grep spi
+#   - The `pi` user is in the gpio and spi groups:
+#       sudo usermod -aG gpio,spi $USER
+#   - Alternatively, run as root inside the container (privileged: true)
+
+services:
+  kiln:
+    build:
+      context: .
+      args:
+        # Use full requirements (includes RPi.GPIO) for Pi hardware build
+        REQUIREMENTS: requirements.txt
+        # Install libgpiod2 system library (needed by adafruit-blinka on Pi)
+        INSTALL_GPIO_LIBS: "1"
+
+    environment:
+      # Disable simulation — talk to real thermocouples and relays
+      - KILN_SIMULATE=false
+
+    # Grant access to GPIO and SPI hardware without full privileged mode.
+    # Add or remove device paths to match your wiring.
+    devices:
+      # GPIO memory map — required by RPi.GPIO and adafruit-blinka
+      - /dev/gpiomem:/dev/gpiomem
+      # Hardware SPI bus (if using hardware SPI instead of bit-bang)
+      - /dev/spidev0.0:/dev/spidev0.0
+      - /dev/spidev0.1:/dev/spidev0.1
+      # Uncomment if a third SPI CS uses SPI1
+      # - /dev/spidev1.0:/dev/spidev1.0
+
+    # Add the container process to the gpio and spi groups so it can access
+    # /dev/gpiomem and /dev/spidev* without running as root.
+    # Find the GIDs on your Pi with: getent group gpio spi
+    group_add:
+      - gpio
+      - spi
+
+    # If the group_add approach causes permission errors on your Pi image,
+    # comment out group_add above and uncomment the line below instead:
+    # privileged: true

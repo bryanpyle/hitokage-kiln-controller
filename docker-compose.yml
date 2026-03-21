@@ -1,0 +1,41 @@
+# docker-compose.yml — DEFAULT: simulation mode, runs on any machine (Mac/Linux/Pi)
+#
+# Usage:
+#   docker compose up --build          # start in simulation mode
+#   docker compose up -d               # detached
+#   docker compose down                # stop and remove containers
+#
+# For real Pi hardware, overlay with docker-compose.pi.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.pi.yml up --build
+
+services:
+  kiln:
+    build:
+      context: .
+      args:
+        # Use dev requirements (no RPi.GPIO) for simulation / x86 builds
+        REQUIREMENTS: requirements-dev.txt
+    image: vesuvius-kiln:latest
+    container_name: vesuvius-kiln
+    restart: unless-stopped
+
+    ports:
+      - "8081:8081"
+
+    environment:
+      # Force simulation mode — safe default, works without hardware
+      - KILN_SIMULATE=true
+      # Write state files into the persistent volume so they survive rebuilds
+      - KILN_STATE_DIR=/app/state-data
+
+    volumes:
+      # Persist firing profiles across container rebuilds
+      - kiln-profiles:/app/storage/profiles
+      # Persist automatic-restart state files
+      - kiln-state:/app/state-data
+      # Optional: mount your local config.py without rebuilding
+      # - ./config.py:/app/config.py:ro
+
+volumes:
+  kiln-profiles:
+  kiln-state:

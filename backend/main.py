@@ -39,7 +39,8 @@ from ovenWatcher import OvenWatcher  # noqa: E402
 
 
 def _default_zone_state_file(zone_id: int) -> str:
-    return os.path.abspath(os.path.join(_repo_root, f"state-zone{zone_id}.json"))
+    state_dir = os.environ.get("KILN_STATE_DIR", "").strip() or _repo_root
+    return os.path.abspath(os.path.join(state_dir, f"state-zone{zone_id}.json"))
 
 
 def get_zone_configs():

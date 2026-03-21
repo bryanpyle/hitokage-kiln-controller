@@ -16,7 +16,10 @@ endef
         run run-pi run-logger run-watcher \
         backend backend-pi \
         frontend frontend-dev frontend-build \
-        dev clean-venv
+        dev clean-venv \
+        docker-build-sim docker-build-pi \
+        docker-up-sim docker-up-pi \
+        docker-down docker-logs docker-push
 
 help:
 	@echo "Available targets:"
@@ -39,6 +42,16 @@ help:
 	@echo ""
 	@echo "  Combined"
 	@echo "  make dev             - Install all deps (Python + npm)"
+	@echo ""
+	@echo "  Docker (simulation — runs on Mac/Linux/Pi without hardware)"
+	@echo "  make docker-build-sim  - Build image with simulation requirements"
+	@echo "  make docker-up-sim     - Build + start in simulation mode"
+	@echo "  make docker-down       - Stop and remove containers"
+	@echo "  make docker-logs       - Tail container logs"
+	@echo ""
+	@echo "  Docker (Raspberry Pi hardware)"
+	@echo "  make docker-build-pi   - Build image with RPi requirements (run on Pi)"
+	@echo "  make docker-up-pi      - Build + start with real GPIO/SPI hardware"
 	@echo ""
 	@echo "  Legacy (bottle/gevent)"
 	@echo "  make run             - Run legacy kiln-controller.py (desktop/macOS deps)"
@@ -110,3 +123,38 @@ run-watcher: dev-install
 
 clean-venv:
 	rm -rf $(VENV)
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+# Simulation build  — works on Mac / Linux / Pi (no RPi.GPIO required)
+docker-build-sim:
+	docker compose build
+
+docker-up-sim: docker-build-sim
+	docker compose up
+
+# Pi hardware build — run this directly on the Raspberry Pi
+# Uses requirements.txt which includes RPi.GPIO
+docker-build-pi:
+	docker compose -f docker-compose.yml -f docker-compose.pi.yml build
+
+docker-up-pi: docker-build-pi
+	docker compose -f docker-compose.yml -f docker-compose.pi.yml up -d
+
+# Shared helpers
+docker-down:
+	docker compose down
+
+docker-logs:
+	docker compose logs -f kiln
+
+# Cross-compile from Mac → ARM64 (Pi 4/5) using buildx.
+# Push to a registry then pull on the Pi, or load locally.
+# Replace IMAGE_TAG with your registry path if pushing remotely.
+IMAGE_TAG ?= vesuvius-kiln:arm64
+docker-buildx-arm64:
+	docker buildx build \
+		--platform linux/arm64 \
+		--build-arg REQUIREMENTS=requirements.txt \
+		--tag $(IMAGE_TAG) \
+		--load \
+		.

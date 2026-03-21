@@ -20,8 +20,8 @@ listening_port = 8081
 # This is used to calculate a cost estimate before a run. It's also used
 # to produce the actual cost during a run. My kiln has three
 # elements that when my switches are set to high, consume 9460 watts.
-kwh_rate        = 0.1319  # cost per kilowatt hour per currency_type to calculate cost to run job
-kw_elements     = 9.460 # if the kiln elements are on, the wattage in kilowatts
+kwh_rate        = 0.1336  # cost per kilowatt hour per currency_type to calculate cost to run job ## bryan - 13.36 cents per kwh in my area as of 2026-03
+kw_elements     = 8.2 # if the kiln elements are on, the wattage in kilowatts ## bryan - 8.2 kw for all 6 elements running.
 currency_type   = "$"   # Currency Symbol to show when calculating cost to run job
 
 ########################################################################
@@ -63,6 +63,7 @@ currency_type   = "$"   # Currency Symbol to show when calculating cost to run j
 #
 # Note that NO pins are configured in this file for hardware spi
 
+# bryan - using software spi
 #######################################
 # SPI pins if you choose software spi #
 #######################################
@@ -334,9 +335,41 @@ zones = [
         "gpio_heat": board.D23,
         "gpio_heat_invert": False,
         "spi_cs": board.D22,
-        "thermocouple_offset": 0,
-        "pid_kp": 10,
-        "pid_ki": 80,
-        "pid_kd": 220.8,
+        # "thermocouple_offset": 0,
+        # "pid_kp": 10,
+        # "pid_ki": 80,
+        # "pid_kd": 220.8,
     },
 ]
+
+########################################################################
+# Environment variable overrides (Docker / containerized deployments)
+#
+# These are evaluated last so they always win over the values above.
+# Supported variables:
+#   KILN_SIMULATE=true|false   override the simulate flag
+#   KILN_PORT=<int>            override listening_port
+########################################################################
+import os as _env_os
+
+_simulate_env = _env_os.environ.get("KILN_SIMULATE", "").strip().lower()
+if _simulate_env in ("1", "true", "yes"):
+    simulate = True
+elif _simulate_env in ("0", "false", "no"):
+    simulate = False
+
+_port_env = _env_os.environ.get("KILN_PORT", "").strip()
+if _port_env:
+    try:
+        listening_port = int(_port_env)
+    except ValueError:
+        pass
+
+# KILN_STATE_DIR — directory where automatic-restart state files are written.
+# Set this to a Docker volume mount so state survives container updates.
+# Default: same directory as config.py (original behaviour).
+_state_dir_env = _env_os.environ.get("KILN_STATE_DIR", "").strip()
+if _state_dir_env:
+    automatic_restart_state_file = _env_os.path.join(
+        _state_dir_env, "state.json"
+    )
