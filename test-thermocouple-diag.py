@@ -24,6 +24,7 @@ import argparse
 import time
 from digitalio import DigitalInOut
 import adafruit_bitbangio as bitbangio
+import busio
 
 try:
     import board
@@ -50,7 +51,12 @@ else:
     zone_name = f'Zone {args.zone}'
 
 # ── set up SPI + sensor ───────────────────────────────────────────────────────
-spi = bitbangio.SPI(config.spi_sclk, config.spi_mosi, config.spi_miso)
+if hasattr(config, 'spi_sclk') and isinstance(config.spi_sclk, str) is False and config.spi_sclk not in (None,):
+    spi = bitbangio.SPI(config.spi_sclk, config.spi_mosi, config.spi_miso)
+    print("Using software SPI")
+else:
+    spi = busio.SPI(board.SCLK, MOSI=board.MOSI, MISO=board.MISO)
+    print("Using hardware SPI")
 cs = DigitalInOut(spi_cs)
 cs.switch_to_output(value=True)
 
