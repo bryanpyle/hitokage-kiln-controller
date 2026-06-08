@@ -11,8 +11,21 @@ try:
     import RPi.GPIO as GPIO
     GPIO.setmode(GPIO.BCM)
     GPIO.setwarnings(False)
-except (ImportError, RuntimeError):
+except (ImportError, RuntimeError) as _gpio_err:
     GPIO = None  # simulation / dev environment
+    _GPIO_IMPORT_ERROR = _gpio_err
+else:
+    _GPIO_IMPORT_ERROR = None
+
+
+def _require_gpio():
+    """Call before any GPIO operation. Raises if GPIO unavailable and not simulating."""
+    if GPIO is None and not config.simulate:
+        raise RuntimeError(
+            "RPi.GPIO is not available ({}). "
+            "Ensure the container has access to /dev/gpiomem (privileged: true "
+            "or correct group_add GID) and RPi.GPIO is installed.".format(_GPIO_IMPORT_ERROR)
+        )
 
 log = logging.getLogger(__name__)
 
@@ -148,6 +161,7 @@ class TempSensorReal(TempSensor):
         GPIO.output(self.cs_pin, GPIO.HIGH)
 
     def spi_setup(self):
+        _require_gpio()
         self.clk_pin  = config.spi_sclk
         self.miso_pin = config.spi_miso
         GPIO.setup(self.clk_pin,  GPIO.OUT)
