@@ -26,7 +26,7 @@
 
 services:
   kiln:
-    image: ${IMAGE:-ghcr.io/REPLACE_WITH_YOUR_ORG/hitokage-kiln-controller:latest}
+    image: ${IMAGE:-ghcr.io/bryanpyle/hitokage-kiln-controller:latest}
     container_name: hitokage-kiln
     restart: unless-stopped
 
