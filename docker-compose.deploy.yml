@@ -37,18 +37,15 @@ services:
       - KILN_SIMULATE=false
       - KILN_STATE_DIR=/app/state-data
 
-    # Raw RPi.GPIO bit-bang SPI only needs /dev/gpiomem — no spidev required
-    devices:
-      - /dev/gpiomem:/dev/gpiomem
+    # Raw RPi.GPIO bit-bang SPI needs access to /dev/gpiomem.
+    # privileged: true is the most reliable approach across Pi OS versions.
+    privileged: true
 
-    # Use numeric GID for gpio group (name not available inside container).
-    # Find yours on the Pi with: getent group gpio | cut -d: -f3
-    # Common values: 997 (Pi OS Bookworm), 998 (older Pi OS), 986 (this install)
-    group_add:
-      - "986"
-
-    # If still getting permission errors, comment out group_add and use instead:
-    # privileged: true
+    # Alternative — use numeric gpio GID without full privilege:
+    # devices:
+    #   - /dev/gpiomem:/dev/gpiomem
+    # group_add:
+    #   - "986"  # find with: getent group gpio | cut -d: -f3
 
     volumes:
       - kiln-profiles:/app/storage/profiles
