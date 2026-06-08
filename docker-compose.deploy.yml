@@ -1,0 +1,82 @@
+# docker-compose.deploy.yml — Pi production deployment
+#
+# Pulls the pre-built ARM64 image from GitHub Container Registry (ghcr.io)
+# instead of building locally. Watchtower watches for new image pushes and
+# automatically pulls + restarts the kiln container.
+#
+# FIRST-TIME SETUP on the Pi:
+#   1. Log in to ghcr.io (one time):
+#        echo <YOUR_GITHUB_PAT> | docker login ghcr.io -u <YOUR_GITHUB_USERNAME> --password-stdin
+#      (PAT needs read:packages scope — https://github.com/settings/tokens)
+#
+#   2. Set your image name in an .env file next to this file:
+#        echo "IMAGE=ghcr.io/your-github-username/hitokage-kiln-controller:latest" > .env
+#
+#   3. Start:
+#        docker compose -f docker-compose.deploy.yml up -d
+#
+# UPDATES:
+#   Watchtower checks ghcr.io every 5 minutes and auto-restarts the kiln
+#   container when a new image is available. No manual steps needed after
+#   pushing to main.
+#
+# MANUAL UPDATE (if you want to force a pull now):
+#   docker compose -f docker-compose.deploy.yml pull && \
+#   docker compose -f docker-compose.deploy.yml up -d
+
+services:
+  kiln:
+    image: ${IMAGE:-ghcr.io/bryanpyle/hitokage-kiln-controller:latest}
+    container_name: hitokage-kiln
+    restart: unless-stopped
+
+    ports:
+      - "8081:8081"
+
+    environment:
+      - KILN_SIMULATE=false
+      - KILN_STATE_DIR=/app/state-data
+
+    # Raw RPi.GPIO bit-bang SPI only needs /dev/gpiomem — no spidev required
+    devices:
+      - /dev/gpiomem:/dev/gpiomem
+
+    group_add:
+      - gpio
+
+    # If group_add causes permission errors, comment it out and use instead:
+    # privileged: true
+
+    volumes:
+      - kiln-profiles:/app/storage/profiles
+      - kiln-state:/app/state-data
+      # To override config without rebuilding:
+      # - ./config.py:/app/config.py:ro
+
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    restart: unless-stopped
+
+    volumes:
+      # Gives Watchtower access to the Docker socket to manage containers
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Gives Watchtower access to ghcr.io credentials from docker login
+      - /home/pi/.docker/config.json:/config.json:ro
+
+    environment:
+      # Only watch containers with the watchtower label above
+      - WATCHTOWER_LABEL_ENABLE=true
+      # Check every 5 minutes (300 seconds)
+      - WATCHTOWER_POLL_INTERVAL=300
+      # Remove old images after updating to keep disk free
+      - WATCHTOWER_CLEANUP=true
+      # Send a notification to the log when an update happens
+      - WATCHTOWER_NOTIFICATIONS=log
+
+volumes:
+  kiln-profiles:
+  kiln-state:

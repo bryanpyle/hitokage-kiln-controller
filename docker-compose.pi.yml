@@ -1,0 +1,41 @@
+# docker-compose.pi.yml — Raspberry Pi HARDWARE overlay
+#
+# Merges with docker-compose.yml to enable real kiln hardware:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.pi.yml up --build
+#
+# Aliases (defined in the Makefile):
+#   make docker-up-pi
+#   make docker-build-pi
+#
+# Prerequisites on the Pi:
+#   - The `pi` user is in the gpio group:
+#       sudo usermod -aG gpio $USER   (then log out and back in)
+#   - No SPI kernel module required — raw RPi.GPIO bit-bang SPI is used.
+
+services:
+  kiln:
+    build:
+      context: .
+      args:
+        # Use full requirements (includes RPi.GPIO) for Pi hardware build
+        REQUIREMENTS: requirements.txt
+        # Install libgpiod2 system library
+        INSTALL_GPIO_LIBS: "1"
+
+    environment:
+      # Disable simulation — talk to real thermocouples and relays
+      - KILN_SIMULATE=false
+
+    # Grant access to GPIO hardware via /dev/gpiomem.
+    # Raw bit-bang SPI (RPi.GPIO) only needs gpiomem — no spidev required.
+    devices:
+      - /dev/gpiomem:/dev/gpiomem
+
+    # Add the container process to the gpio group so it can access /dev/gpiomem
+    # without running as root. Find the GID on your Pi with: getent group gpio
+    group_add:
+      - gpio
+
+    # If group_add causes permission errors, comment it out and use this instead:
+    # privileged: true

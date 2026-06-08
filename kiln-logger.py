@@ -38,10 +38,12 @@ PID_HEADER = [
 ]
 
 
-def logger(hostname, csvfile, noprofilestats, pidstats, stdout):
+def logger(hostname, csvfile, noprofilestats, pidstats, stdout, zone):
     status_ws = websocket.WebSocket()
 
     csv_fields = []
+    # always include zone for multi-zone controllers
+    csv_fields += ['zone']
     if not noprofilestats:
         csv_fields += STD_HEADER
     if pidstats:
@@ -63,7 +65,7 @@ def logger(hostname, csvfile, noprofilestats, pidstats, stdout):
 
         except websocket.WebSocketException:
             try:
-                status_ws.connect(f'ws://{hostname}/status')
+                status_ws.connect(f'ws://{hostname}/status?zone={zone}')
             except Exception:
                 time.sleep(5)
 
@@ -71,6 +73,10 @@ def logger(hostname, csvfile, noprofilestats, pidstats, stdout):
 
         if msg.get('type') == 'backlog':
             continue
+
+        # Ensure zone is present for multi-zone CSVs
+        if 'zone' not in msg:
+            msg['zone'] = zone
 
         if not noprofilestats:
             msg['stamp'] = time.time()
@@ -93,10 +99,11 @@ def logger(hostname, csvfile, noprofilestats, pidstats, stdout):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Log kiln data for analysis.')
     parser.add_argument('--hostname', type=str, default="localhost:8081", help="The kiln-controller hostname:port")
+    parser.add_argument('--zone', type=int, default=0, help="Zone id to log (0-based)")
     parser.add_argument('--csvfile', type=str, default="/tmp/kilnstats.csv", help="Where to write the kiln stats to")
     parser.add_argument('--pidstats', action='store_true', help="Include PID stats")
     parser.add_argument('--noprofilestats', action='store_true', help="Do not store profile stats (default is to store them)")
     parser.add_argument('--stdout', action='store_true', help="Also print to stdout")
     args = parser.parse_args()
 
-    logger(args.hostname, args.csvfile, args.noprofilestats, args.pidstats, args.stdout)
+    logger(args.hostname, args.csvfile, args.noprofilestats, args.pidstats, args.stdout, args.zone)

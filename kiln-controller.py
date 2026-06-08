@@ -30,15 +30,127 @@ from ovenWatcher import OvenWatcher
 
 app = bottle.Bottle()
 
+
+def _default_zone_state_file(zone_id: int) -> str:
+    base_dir = os.path.dirname(os.path.realpath(__file__))
+    return os.path.abspath(os.path.join(base_dir, f"state-zone{zone_id}.json"))
+
+
+def get_zone_configs():
+    """Return a normalized list of zone configs.
+
+    Backward compatible with legacy single-zone settings.
+    """
+
+    zones = getattr(config, 'zones', None)
+    if zones:
+        normalized = []
+        for zone_id, zone in enumerate(zones):
+            zone = zone or {}
+            normalized.append(
+                {
+                    'id': zone_id,
+                    'name': zone.get('name', f"Zone {zone_id + 1}"),
+                    'spi_cs': zone.get('spi_cs', getattr(config, 'spi_cs', None)),
+                    'gpio_heat': zone.get('gpio_heat', getattr(config, 'gpio_heat', None)),
+                    'gpio_heat_invert': zone.get('gpio_heat_invert', getattr(config, 'gpio_heat_invert', False)),
+                    'pid_kp': zone.get('pid_kp', getattr(config, 'pid_kp', None)),
+                    'pid_ki': zone.get('pid_ki', getattr(config, 'pid_ki', None)),
+                    'pid_kd': zone.get('pid_kd', getattr(config, 'pid_kd', None)),
+                    'thermocouple_offset': zone.get('thermocouple_offset', getattr(config, 'thermocouple_offset', 0)),
+                    'automatic_restart_state_file': zone.get(
+                        'automatic_restart_state_file', _default_zone_state_file(zone_id)
+                    ),
+                }
+            )
+        return normalized
+
+    # Legacy single-zone fallback
+    return [
+        {
+            'id': 0,
+            'name': 'Zone 1',
+            'spi_cs': getattr(config, 'spi_cs', None),
+            'gpio_heat': getattr(config, 'gpio_heat', None),
+            'gpio_heat_invert': getattr(config, 'gpio_heat_invert', False),
+            'pid_kp': getattr(config, 'pid_kp', None),
+            'pid_ki': getattr(config, 'pid_ki', None),
+            'pid_kd': getattr(config, 'pid_kd', None),
+            'thermocouple_offset': getattr(config, 'thermocouple_offset', 0),
+            'automatic_restart_state_file': getattr(config, 'automatic_restart_state_file', _default_zone_state_file(0)),
+        }
+    ]
+
+
+ZONE_CONFIGS = get_zone_configs()
+
+
+def get_zone_id_from_request(default=0):
+    # JSON body zone
+    try:
+        if bottle.request.json and 'zone' in bottle.request.json:
+            return int(bottle.request.json.get('zone', default))
+    except Exception:
+        pass
+    # Query string zone
+    try:
+        if bottle.request.query.get('zone') is not None:
+            return int(bottle.request.query.get('zone', default))
+    except Exception:
+        pass
+    return default
+
+
+def get_oven(zone_id: int):
+    try:
+        return ovens[zone_id]
+    except Exception:
+        raise bottle.HTTPError(400, f"invalid zone {zone_id}")
+
+
+def get_watcher(zone_id: int):
+    try:
+        return watchers[zone_id]
+    except Exception:
+        raise bottle.HTTPError(400, f"invalid zone {zone_id}")
+
+
+ovens = {}
+watchers = {}
+
 if config.simulate == True:
     log.info("this is a simulation")
-    oven = SimulatedOven()
+    for z in ZONE_CONFIGS:
+        ovens[z['id']] = SimulatedOven(
+            zone_id=z['id'],
+            zone_name=z['name'],
+            pid_kp=z['pid_kp'],
+            pid_ki=z['pid_ki'],
+            pid_kd=z['pid_kd'],
+            thermocouple_offset=z['thermocouple_offset'],
+            automatic_restart_state_file=z['automatic_restart_state_file'],
+        )
 else:
     log.info("this is a real kiln")
-    oven = RealOven()
-ovenWatcher = OvenWatcher(oven)
-# this ovenwatcher is used in the oven class for restarts
-oven.set_ovenwatcher(ovenWatcher)
+    for z in ZONE_CONFIGS:
+        ovens[z['id']] = RealOven(
+            zone_id=z['id'],
+            zone_name=z['name'],
+            spi_cs=z['spi_cs'],
+            gpio_heat=z['gpio_heat'],
+            gpio_heat_invert=z['gpio_heat_invert'],
+            pid_kp=z['pid_kp'],
+            pid_ki=z['pid_ki'],
+            pid_kd=z['pid_kd'],
+            thermocouple_offset=z['thermocouple_offset'],
+            automatic_restart_state_file=z['automatic_restart_state_file'],
+        )
+
+for zone_id, oven in ovens.items():
+    watcher = OvenWatcher(oven)
+    watchers[zone_id] = watcher
+    # this ovenwatcher is used in the oven class for restarts
+    oven.set_ovenwatcher(watcher)
 
 @app.route('/')
 def index():
@@ -46,13 +158,18 @@ def index():
 
 @app.route('/state')
 def state():
+    zone = bottle.request.query.get('zone')
+    if zone is not None:
+        return bottle.redirect(f'/picoreflow/state.html?zone={zone}')
     return bottle.redirect('/picoreflow/state.html')
 
 @app.get('/api/stats')
 def handle_api():
     log.info("/api/stats command received")
-    if hasattr(oven,'pid'):
-        if hasattr(oven.pid,'pidstats'):
+    zone_id = get_zone_id_from_request(default=0)
+    oven = get_oven(zone_id)
+    if hasattr(oven, 'pid'):
+        if hasattr(oven.pid, 'pidstats'):
             return json.dumps(oven.pid.pidstats)
 
 
@@ -60,11 +177,15 @@ def handle_api():
 def handle_api():
     log.info("/api is alive")
 
+    zone_id = get_zone_id_from_request(default=0)
+    oven = get_oven(zone_id)
+    ovenWatcher = get_watcher(zone_id)
+
 
     # run a kiln schedule
     if bottle.request.json['cmd'] == 'run':
         wanted = bottle.request.json['profile']
-        log.info('api requested run of profile = %s' % wanted)
+        log.info('api requested run of profile = %s zone=%d' % (wanted, zone_id))
 
         # start at a specific minute in the schedule
         # for restarting and skipping over early parts of a schedule
@@ -139,13 +260,14 @@ def get_websocket_from_request():
     env = bottle.request.environ
     wsock = env.get('wsgi.websocket')
     if not wsock:
-        abort(400, 'Expected WebSocket request.')
+        bottle.abort(400, 'Expected WebSocket request.')
     return wsock
 
 
 @app.route('/control')
 def handle_control():
     wsock = get_websocket_from_request()
+    zone_from_query = get_zone_id_from_request(default=0)
     log.info("websocket (control) opened")
     while True:
         try:
@@ -153,6 +275,9 @@ def handle_control():
             if message:
                 log.info("Received (control): %s" % message)
                 msgdict = json.loads(message)
+                zone_id = int(msgdict.get('zone', zone_from_query))
+                oven = get_oven(zone_id)
+                ovenWatcher = get_watcher(zone_id)
                 if msgdict.get("cmd") == "RUN":
                     log.info("RUN command received")
                     profile_obj = msgdict.get('profile')
@@ -246,6 +371,8 @@ def handle_config():
 @app.route('/status')
 def handle_status():
     wsock = get_websocket_from_request()
+    zone_id = get_zone_id_from_request(default=0)
+    ovenWatcher = get_watcher(zone_id)
     ovenWatcher.add_observer(wsock)
     log.info("websocket (status) opened")
     while True:
@@ -338,7 +465,9 @@ def get_config():
         "time_scale_slope": config.time_scale_slope,
         "time_scale_profile": config.time_scale_profile,
         "kwh_rate": config.kwh_rate,
-        "currency_type": config.currency_type})    
+        "currency_type": config.currency_type,
+        "zones": [{"id": z["id"], "name": z["name"]} for z in ZONE_CONFIGS],
+    })    
 
 def main():
     ip = "0.0.0.0"

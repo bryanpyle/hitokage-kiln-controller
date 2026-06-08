@@ -7,7 +7,9 @@ if (window.location.protocol == 'https:') {
   protocol = 'wss:';
   }
 var host = "" + protocol + "//" + window.location.hostname + ":" + window.location.port;
-var ws_status = new WebSocket(host+"/status");
+var params = new URLSearchParams(window.location.search);
+var zone = params.get('zone') || '0';
+var ws_status = new WebSocket(host+"/status?zone=" + encodeURIComponent(zone));
 var ws_config = new WebSocket(host+"/config");
 
 ws_status.onmessage = function(e) {

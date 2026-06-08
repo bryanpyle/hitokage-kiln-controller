@@ -14,15 +14,249 @@ var temp_scale_display = "C";
 var kwh_rate = 0.26;
 var currency_type = "EUR";
 
+var current_zone = 0;
+var available_zones = [
+    {id: 0, name: "Zone 1 (Top)", color: "#e74c3c"},
+    {id: 1, name: "Zone 2 (Middle)", color: "#f39c12"},
+    {id: 2, name: "Zone 3 (Bottom)", color: "#3498db"}
+];
+
+// Track current temperature for each zone
+var zone_temperatures = [0, 0, 0];
+// Track heat state (relay on/off) for each zone
+var zone_heat_states = [0, 0, 0];
+
 var protocol = 'ws:';
 if (window.location.protocol == 'https:') {
     protocol = 'wss:';
 }
 var host = "" + protocol + "//" + window.location.hostname + ":" + window.location.port;
-var ws_status = new WebSocket(host+"/status");
-var ws_control = new WebSocket(host+"/control");
 var ws_config = new WebSocket(host+"/config");
 var ws_storage = new WebSocket(host+"/storage");
+
+// Arrays to hold websockets for all zones
+var ws_status = [];
+var ws_control = [];
+
+function zoneQuery(zone_id) {
+    return "?zone=" + encodeURIComponent(zone_id);
+}
+
+function connectZoneSockets() {
+    // Close existing connections
+    for (var i = 0; i < ws_status.length; i++) {
+        try { if (ws_status[i]) ws_status[i].close(); } catch (e) {}
+        try { if (ws_control[i]) ws_control[i].close(); } catch (e) {}
+    }
+
+    ws_status = [];
+    ws_control = [];
+
+    // Connect to all zones
+    for (var i = 0; i < available_zones.length; i++) {
+        ws_status[i] = new WebSocket(host + "/status" + zoneQuery(i));
+        ws_control[i] = new WebSocket(host + "/control" + zoneQuery(i));
+        bindStatusSocket(i);
+        bindControlSocket(i);
+        // Reset live graph data for each zone
+        if (graph['live_zone' + i]) {
+            graph['live_zone' + i].data = [];
+        }
+    }
+
+    updateGraphPlot();
+}
+
+function bindStatusSocket(zone_id) {
+    ws_status[zone_id].onopen = function()
+    {
+        console.log("Status Socket for Zone " + zone_id + " has been opened");
+    };
+
+    ws_status[zone_id].onclose = function()
+    {
+        $.bootstrapGrowl("<span class=\"glyphicon glyphicon-exclamation-sign\"></span> <b>ERROR:</b><br/>Status Websocket for Zone " + zone_id + " not available", {
+        ele: 'body',
+        type: 'error',
+        offset: {from: 'top', amount: 250},
+        align: 'center',
+        width: 385,
+        delay: 5000,
+        allow_dismiss: true,
+        stackup_spacing: 10
+      });
+    };
+
+    ws_status[zone_id].onmessage = function(e)
+    {
+        x = JSON.parse(e.data);
+        var zone = zone_id; // Capture zone_id in closure
+        
+        if (x.type == "backlog")
+        {
+            if (x.profile && zone === 0) // Only process profile from first zone
+            {
+                selected_profile_name = x.profile.name;
+                $.each(profiles,  function(i,v) {
+                    if(v.name == x.profile.name) {
+                        updateProfile(i);
+                        $('#e2').select2('val', i);
+                    }
+                });
+            }
+
+            $.each(x.log, function(i,v) {
+                graph['live_zone' + zone].data.push([v.runtime, v.temperature]);
+                // Track the last temperature and heat state from backlog
+                if (v.temperature) {
+                    zone_temperatures[zone] = v.temperature;
+                }
+                if (v.heat !== undefined) {
+                    zone_heat_states[zone] = v.heat;
+                }
+            });
+            
+            // Update labels with temperatures from backlog
+            updateZoneLabels();
+            updateGraphPlot();
+        }
+
+        if(state!="EDIT")
+        {
+            // Only update state from zone 0 to avoid conflicts
+            if (zone === 0) {
+                state = x.state;
+                if (state!=state_last)
+                {
+                    if(state_last == "RUNNING" && state != "PAUSED" )
+                    {
+                        console.log(state);
+                        $('#target_temp').html('---');
+                        updateProgress(0);
+                        $.bootstrapGrowl("<span class=\"glyphicon glyphicon-exclamation-sign\"></span> <b>Run completed</b>", {
+                        ele: 'body',
+                        type: 'success',
+                        offset: {from: 'top', amount: 250},
+                        align: 'center',
+                        width: 385,
+                        delay: 0,
+                        allow_dismiss: true,
+                        stackup_spacing: 10
+                        });
+                    }
+                }
+
+                if(state=="RUNNING")
+                {
+                    $("#nav_start").hide();
+                    $("#nav_stop").show();
+                    // Disable profile selector during run
+                    $('#e2').prop('disabled', true);
+
+                    left = parseInt(x.totaltime-x.runtime);
+                    eta = new Date(left * 1000).toISOString().substr(11, 8);
+
+                    updateProgress(parseFloat(x.runtime)/parseFloat(x.totaltime)*100);
+                    $('#state').html('<span class="glyphicon glyphicon-time" style="font-size: 22px; font-weight: normal"></span><span style="font-family: Digi; font-size: 40px;">' + eta + '</span>');
+                    $('#target_temp').html(parseInt(x.target));
+                    $('#cost').html(x.currency_type + parseFloat(x.cost).toFixed(2));
+                }
+                else
+                {
+                    $("#nav_start").show();
+                    $("#nav_stop").hide();
+                    // Re-enable profile selector when not running
+                    $('#e2').prop('disabled', false);
+                    $('#state').html('<p class="ds-text">'+state+'</p>');
+                }
+
+                if (typeof x.pidstats !== 'undefined') {
+                    $('#heat').html('<div class="bar" style="height:'+x.pidstats.out*70+'%;"></div>')
+                }
+                if (x.cool > 0.5) { $('#cool').addClass("ds-led-cool-active"); } else { $('#cool').removeClass("ds-led-cool-active"); }
+                if (x.air > 0.5) { $('#air').addClass("ds-led-air-active"); } else { $('#air').removeClass("ds-led-air-active"); }
+                if (x.temperature > hazardTemp()) { $('#hazard').addClass("ds-led-hazard-active"); } else { $('#hazard').removeClass("ds-led-hazard-active"); }
+                if ((x.door == "OPEN") || (x.door == "UNKNOWN")) { $('#door').addClass("ds-led-door-open"); } else { $('#door').removeClass("ds-led-door-open"); }
+
+                state_last = state;
+            }
+
+            // Add temperature data point for this zone
+            if (state == "RUNNING") {
+                graph['live_zone' + zone].data.push([x.runtime, x.temperature]);
+                updateGraphPlot();
+            }
+
+            // Store temperature and heat state for this zone
+            zone_temperatures[zone] = x.temperature;
+            zone_heat_states[zone] = x.heat || 0;
+
+            // Calculate and display average temperature from all zones
+            var total_temp = 0;
+            var temp_count = 0;
+
+            for (var i = 0; i < available_zones.length; i++) {
+                if (zone_temperatures[i] !== undefined && zone_temperatures[i] > 0) {
+                    total_temp += zone_temperatures[i];
+                    temp_count++;
+                }
+            }
+
+            if (temp_count > 0) {
+                var avg_temp = total_temp / temp_count;
+                $('#act_temp').html(parseInt(avg_temp));
+            }
+
+            // Update graph labels to show current temperatures
+            updateZoneLabels();
+            updateGraphPlot();
+
+            // For heat rate, just use x.heat_rate from zone 0 for now
+            if (zone === 0) {
+                heat_rate = parseInt(x.heat_rate);
+                if (heat_rate > 9999) { heat_rate = 9999; }
+                if (heat_rate < -9999) { heat_rate = -9999; }
+                $('#heat_rate').html(heat_rate);
+            }
+        }
+    };
+}
+
+function bindControlSocket(zone_id) {
+    ws_control[zone_id].onopen = function()
+    {
+        console.log("Control socket for Zone " + zone_id + " has been opened");
+    };
+
+    ws_control[zone_id].onmessage = function(e)
+    {
+        //Data from Simulation
+        console.log ("control socket message from zone " + zone_id);
+        console.log (e.data);
+        x = JSON.parse(e.data);
+        var zone = zone_id; // Capture in closure
+        graph['live_zone' + zone].data.push([x.runtime, x.temperature]);
+        
+        // Update temperature and heat state tracking
+        if (x.temperature) {
+            zone_temperatures[zone] = x.temperature;
+        }
+        if (x.heat !== undefined) {
+            zone_heat_states[zone] = x.heat;
+        }
+        updateZoneLabels();
+        
+        updateGraphPlot();
+    }
+}
+
+function renderZoneSelector() {
+    // Zone selector is now hidden since all zones work together
+    var select = $('#zone_select');
+    if (select.length) {
+        select.hide();
+    }
+}
 
 
 if(window.webkitRequestAnimationFrame) window.requestAnimationFrame = window.webkitRequestAnimationFrame;
@@ -36,14 +270,64 @@ graph.profile =
     draggable: false
 };
 
-graph.live =
+// Create separate live data series for each zone
+graph.live_zone0 =
 {
-    label: "Live",
+    label: "Zone 1 (Top)",
     data: [],
     points: { show: false },
-    color: "#d8d3c5",
+    color: "#e74c3c",
     draggable: false
 };
+
+graph.live_zone1 =
+{
+    label: "Zone 2 (Middle)",
+    data: [],
+    points: { show: false },
+    color: "#f39c12",
+    draggable: false
+};
+
+graph.live_zone2 =
+{
+    label: "Zone 3 (Bottom)",
+    data: [],
+    points: { show: false },
+    color: "#3498db",
+    draggable: false
+};
+
+// Helper function to update the graph with all series
+function updateGraphPlot() {
+    graph.plot = $.plot("#graph_container", [ 
+        graph.profile, 
+        graph.live_zone0, 
+        graph.live_zone1, 
+        graph.live_zone2 
+    ], getOptions());
+}
+
+// Helper function to update zone labels with current temperatures
+function updateZoneLabels() {
+    for (var i = 0; i < available_zones.length; i++) {
+        var label = available_zones[i].name;
+        var heatIcon = '';
+        
+        // Add fire or snowflake emoji based on heat state
+        if (zone_heat_states[i] > 0.5) {
+            heatIcon = '🔥 ';
+        } else {
+            heatIcon = '❄️ ';
+        }
+        
+        if (zone_temperatures[i] && zone_temperatures[i] > 0) {
+            graph['live_zone' + i].label = heatIcon + label + ': ' + parseInt(zone_temperatures[i]) + '°' + temp_scale_display;
+        } else {
+            graph['live_zone' + i].label = heatIcon + label;
+        }
+    }
+}
 
 
 function updateProfile(id)
@@ -58,7 +342,7 @@ function updateProfile(id)
     $('#sel_prof_eta').html(job_time);
     $('#sel_prof_cost').html(kwh + ' kWh ('+ currency_type +': '+ cost +')');
     graph.profile.data = profiles[id].data;
-    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ] , getOptions());
+    updateGraphPlot();
 }
 
 function deleteProfile()
@@ -83,7 +367,7 @@ function deleteProfile()
     $('#e2').select2('val', 0);
     graph.profile.points.show = false;
     graph.profile.draggable = false;
-    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ], getOptions());
+    updateGraphPlot();
 }
 
 
@@ -147,7 +431,7 @@ function updateProfileTable()
                 graph.profile.data[row][col] = value;
             }
 
-            graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ], getOptions());
+            updateGraphPlot();
             }
             updateProfileTable();
 
@@ -210,39 +494,46 @@ if(axis.max<=60) {
 
 function runTask()
 {
-    var cmd =
-    {
-        "cmd": "RUN",
-        "profile": profiles[selected_profile]
+    // Send RUN command to all zones
+    for (var i = 0; i < available_zones.length; i++) {
+        var cmd = {
+            "cmd": "RUN",
+            "zone": i,
+            "profile": profiles[selected_profile]
+        };
+        // Clear live data for this zone
+        graph['live_zone' + i].data = [];
+        ws_control[i].send(JSON.stringify(cmd));
     }
 
-    graph.live.data = [];
-    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ] , getOptions());
-
-    ws_control.send(JSON.stringify(cmd));
-
+    updateGraphPlot();
 }
 
 function runTaskSimulation()
 {
-    var cmd =
-    {
-        "cmd": "SIMULATE",
-        "profile": profiles[selected_profile]
+    // Send SIMULATE command to all zones
+    for (var i = 0; i < available_zones.length; i++) {
+        var cmd = {
+            "cmd": "SIMULATE",
+            "zone": i,
+            "profile": profiles[selected_profile]
+        };
+        // Clear live data for this zone
+        graph['live_zone' + i].data = [];
+        ws_control[i].send(JSON.stringify(cmd));
     }
 
-    graph.live.data = [];
-    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ] , getOptions());
-
-    ws_control.send(JSON.stringify(cmd));
-
+    updateGraphPlot();
 }
 
 
 function abortTask()
 {
-    var cmd = {"cmd": "STOP"};
-    ws_control.send(JSON.stringify(cmd));
+    // Send STOP command to all zones
+    for (var i = 0; i < available_zones.length; i++) {
+        var cmd = {"cmd": "STOP", "zone": i};
+        ws_control[i].send(JSON.stringify(cmd));
+    }
 }
 
 function enterNewMode()
@@ -257,7 +548,7 @@ function enterNewMode()
     graph.profile.points.show = true;
     graph.profile.draggable = true;
     graph.profile.data = [];
-    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ], getOptions());
+    updateGraphPlot();
     updateProfileTable();
 }
 
@@ -272,7 +563,7 @@ function enterEditMode()
     $('#form_profile_name').val(profiles[selected_profile].name);
     graph.profile.points.show = true;
     graph.profile.draggable = true;
-    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ], getOptions());
+    updateGraphPlot();
     updateProfileTable();
     toggleTable();
 }
@@ -289,7 +580,7 @@ function leaveEditMode()
     $('#profile_table').slideUp();
     graph.profile.points.show = false;
     graph.profile.draggable = false;
-    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ], getOptions());
+    updateGraphPlot();
 }
 
 function newPoint()
@@ -303,14 +594,14 @@ function newPoint()
         var pointx = 0;
     }
     graph.profile.data.push([pointx, Math.floor((Math.random()*230)+25)]);
-    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ], getOptions());
+    updateGraphPlot();
     updateProfileTable();
 }
 
 function delPoint()
 {
     graph.profile.data.splice(-1,1)
-    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ], getOptions());
+    updateGraphPlot();
     updateProfileTable();
 }
 
@@ -447,7 +738,10 @@ function getOptions()
 
     legend:
     {
-      show: false
+      show: true,
+      position: "nw",
+      backgroundColor: "rgba(0, 0, 0, 0.7)",
+      labelBoxBorderColor: "rgba(255, 255, 255, 0.2)"
     }
   }
 
@@ -468,127 +762,12 @@ $(document).ready(function()
     else
     {
 
-        // Status Socket ////////////////////////////////
+        renderZoneSelector();  // Hides the zone selector
+        // No zone change handler needed - all zones work together now
 
-        ws_status.onopen = function()
-        {
-            console.log("Status Socket has been opened");
+        // Create zone-specific sockets now that the DOM is ready
+        connectZoneSockets();
 
-//            $.bootstrapGrowl("<span class=\"glyphicon glyphicon-exclamation-sign\"></span>Getting data from server",
-//            {
-//            ele: 'body', // which element to append to
-//            type: 'success', // (null, 'info', 'error', 'success')
-//            offset: {from: 'top', amount: 250}, // 'top', or 'bottom'
-//            align: 'center', // ('left', 'right', or 'center')
-//            width: 385, // (integer, or 'auto')
-//            delay: 2500,
-//            allow_dismiss: true,
-//            stackup_spacing: 10 // spacing between consecutively stacked growls.
-//            });
-        };
-
-        ws_status.onclose = function()
-        {
-            $.bootstrapGrowl("<span class=\"glyphicon glyphicon-exclamation-sign\"></span> <b>ERROR 1:</b><br/>Status Websocket not available", {
-            ele: 'body', // which element to append to
-            type: 'error', // (null, 'info', 'error', 'success')
-            offset: {from: 'top', amount: 250}, // 'top', or 'bottom'
-            align: 'center', // ('left', 'right', or 'center')
-            width: 385, // (integer, or 'auto')
-            delay: 5000,
-            allow_dismiss: true,
-            stackup_spacing: 10 // spacing between consecutively stacked growls.
-          });
-        };
-
-        ws_status.onmessage = function(e)
-        {
-            x = JSON.parse(e.data);
-            if (x.type == "backlog")
-            {
-                if (x.profile)
-                {
-                    selected_profile_name = x.profile.name;
-                    $.each(profiles,  function(i,v) {
-                        if(v.name == x.profile.name) {
-                            updateProfile(i);
-                            $('#e2').select2('val', i);
-                        }
-                    });
-                }
-
-                $.each(x.log, function(i,v) {
-                    graph.live.data.push([v.runtime, v.temperature]);
-                    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ] , getOptions());
-                });
-            }
-
-            if(state!="EDIT")
-            {
-                state = x.state;
-                if (state!=state_last)
-                {
-                    if(state_last == "RUNNING" && state != "PAUSED" )
-                    {
-			console.log(state);
-                        $('#target_temp').html('---');
-                        updateProgress(0);
-                        $.bootstrapGrowl("<span class=\"glyphicon glyphicon-exclamation-sign\"></span> <b>Run completed</b>", {
-                        ele: 'body', // which element to append to
-                        type: 'success', // (null, 'info', 'error', 'success')
-                        offset: {from: 'top', amount: 250}, // 'top', or 'bottom'
-                        align: 'center', // ('left', 'right', or 'center')
-                        width: 385, // (integer, or 'auto')
-                        delay: 0,
-                        allow_dismiss: true,
-                        stackup_spacing: 10 // spacing between consecutively stacked growls.
-                        });
-                    }
-                }
-
-                if(state=="RUNNING")
-                {
-                    $("#nav_start").hide();
-                    $("#nav_stop").show();
-
-                    graph.live.data.push([x.runtime, x.temperature]);
-                    graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ] , getOptions());
-
-                    left = parseInt(x.totaltime-x.runtime);
-                    eta = new Date(left * 1000).toISOString().substr(11, 8);
-
-                    updateProgress(parseFloat(x.runtime)/parseFloat(x.totaltime)*100);
-                    $('#state').html('<span class="glyphicon glyphicon-time" style="font-size: 22px; font-weight: normal"></span><span style="font-family: Digi; font-size: 40px;">' + eta + '</span>');
-                    $('#target_temp').html(parseInt(x.target));
-                    $('#cost').html(x.currency_type + parseFloat(x.cost).toFixed(2));
-                  
-
-
-                }
-                else
-                {
-                    $("#nav_start").show();
-                    $("#nav_stop").hide();
-                    $('#state').html('<p class="ds-text">'+state+'</p>');
-                }
-
-                $('#act_temp').html(parseInt(x.temperature));
-                heat_rate = parseInt(x.heat_rate)
-                if (heat_rate > 9999) { heat_rate = 9999; }
-                if (heat_rate < -9999) { heat_rate = -9999; }
-                $('#heat_rate').html(heat_rate);
-                if (typeof x.pidstats !== 'undefined') {
-                    $('#heat').html('<div class="bar" style="height:'+x.pidstats.out*70+'%;"></div>')
-                    }
-                if (x.cool > 0.5) { $('#cool').addClass("ds-led-cool-active"); } else { $('#cool').removeClass("ds-led-cool-active"); }
-                if (x.air > 0.5) { $('#air').addClass("ds-led-air-active"); } else { $('#air').removeClass("ds-led-air-active"); }
-                if (x.temperature > hazardTemp()) { $('#hazard').addClass("ds-led-hazard-active"); } else { $('#hazard').removeClass("ds-led-hazard-active"); }
-                if ((x.door == "OPEN") || (x.door == "UNKNOWN")) { $('#door').addClass("ds-led-door-open"); } else { $('#door').removeClass("ds-led-door-open"); }
-
-                state_last = state;
-
-            }
-        };
 
         // Config Socket /////////////////////////////////
 
@@ -607,8 +786,22 @@ $(document).ready(function()
             kwh_rate = x.kwh_rate;
             currency_type = x.currency_type;
 
+            if (x.zones && x.zones.length) {
+                // Update zone information from server if provided
+                for (var i = 0; i < x.zones.length && i < available_zones.length; i++) {
+                    if (x.zones[i].name) {
+                        available_zones[i].name = x.zones[i].name;
+                        graph['live_zone' + i].label = x.zones[i].name;
+                    }
+                }
+                renderZoneSelector();
+                updateGraphPlot();
+            }
+
             if (temp_scale == "c") {temp_scale_display = "C";} else {temp_scale_display = "F";}
 
+            // Update zone labels with new temperature scale
+            updateZoneLabels();
 
             $('#act_temp_scale').html('º'+temp_scale_display);
             $('#target_temp_scale').html('º'+temp_scale_display);
@@ -629,22 +822,6 @@ $(document).ready(function()
         }
 
         // Control Socket ////////////////////////////////
-
-        ws_control.onopen = function()
-        {
-
-        };
-
-        ws_control.onmessage = function(e)
-        {
-            //Data from Simulation
-            console.log ("control socket has been opened")
-            console.log (e.data);
-            x = JSON.parse(e.data);
-            graph.live.data.push([x.runtime, x.temperature]);
-            graph.plot = $.plot("#graph_container", [ graph.profile, graph.live ] , getOptions());
-
-        }
 
         // Storage Socket ///////////////////////////////
 

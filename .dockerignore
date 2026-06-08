@@ -1,0 +1,36 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+*.pyc
+__pycache__/
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# ── Runtime state (never bake into image) ────────────────────────────────────
+state*.json
+
+# ── Frontend source (only the built dist/ is copied into the image) ──────────
+frontend/node_modules/
+frontend/.vite/
+# Keep frontend/dist/ — it is produced by Stage 1 of the Dockerfile,
+# NOT copied from the host.  The line below would exclude it from context,
+# which is correct because Stage 1 rebuilds it inside Docker.
+frontend/dist/
+
+# ── Dev / editor artifacts ────────────────────────────────────────────────────
+.DS_Store
+.idea/
+*.swp
+*~
+\#*
+.#*
+*.code-workspace
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+ziplogs/
+
+# ── Git ───────────────────────────────────────────────────────────────────────
+.git/

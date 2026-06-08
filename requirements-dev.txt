@@ -11,20 +11,17 @@ fastapi>=0.115.0          # Modern async web framework
 uvicorn[standard]>=0.32.0 # ASGI server with uvloop + websockets
 pydantic>=2.9.0           # Data validation (bundled with FastAPI)
 
-# for folks running raspberry pis
-# we have no proof of anyone using another board yet, but when that 
-# happens, you might want to comment this out.
-RPi.GPIO  # Raspberry Pi GPIO pin control (hardware only)
+# CircuitPython/Blinka stack for imports like board/digitalio/busio on non-RPi dev machines
+adafruit-blinka  # board compatibility layer used by CircuitPython libraries
 
-# List of all supported adafruit modules for thermocouples
+# Thermocouple libraries
 adafruit-circuitpython-max31855  # MAX31855 thermocouple interface
 adafruit-circuitpython-max31856  # MAX31856 thermocouple interface
 
-# for folks using sw spi (bit banging)
+# Software SPI support (used in test scripts and some board setups)
 adafruit-circuitpython-bitbangio  # software SPI support for compatible boards
 
-# untested - for PT100 platinum thermocouples
-#adafruit-circuitpython-max31865  # optional PT100/RTD amplifier support
-
-# untested - for mcp9600 and mcp9601
-#adafruit-circuitpython-mcp9600  # optional MCP9600/9601 thermocouple support
+# NOTE:
+# - This file intentionally excludes RPi.GPIO (Raspberry Pi-only, often fails on macOS).
+# - Use this file for development on macOS/Linux desktops.
+# - Use requirements.txt on Raspberry Pi hardware deployments.

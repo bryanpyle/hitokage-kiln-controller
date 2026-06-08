@@ -10,3 +10,14 @@ thumbs.db
 .idea/*
 state.json
 venv/*
+.venv/*
+
+**/*.code-workspace
+
+state*.json
+
+# Frontend (Vite/React)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/*.local

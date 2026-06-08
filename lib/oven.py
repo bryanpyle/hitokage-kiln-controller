@@ -5,12 +5,20 @@ import logging
 import json
 import config
 import os
-import digitalio
-import busio
-import adafruit_bitbangio as bitbangio
 import statistics
 
+try:
+    import RPi.GPIO as GPIO
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setwarnings(False)
+except (ImportError, RuntimeError):
+    GPIO = None  # simulation / dev environment
+
 log = logging.getLogger(__name__)
+
+# When running multiple zones, each thermocouple reader runs in its own thread.
+# The SPI bus is shared, so serialize raw reads to avoid contention.
+SPI_LOCK = threading.Lock()
 
 class DupFilter(object):
     def __init__(self):
@@ -38,20 +46,27 @@ class Output(object):
         config.gpio_heat
         config.gpio_heat_invert
     '''
-    def __init__(self):
+    def __init__(self, gpio_heat=None, gpio_heat_invert=None):
         self.active = False
-        self.heater = digitalio.DigitalInOut(config.gpio_heat) 
-        self.heater.direction = digitalio.Direction.OUTPUT 
-        self.off = config.gpio_heat_invert
-        self.on = not self.off
+        if gpio_heat is None:
+            gpio_heat = config.gpio_heat
+        if gpio_heat_invert is None:
+            gpio_heat_invert = config.gpio_heat_invert
 
-    def heat(self,sleepfor):
-        self.heater.value = self.on
+        self.pin = gpio_heat
+        # gpio_heat_invert=True means the SSR fires on LOW
+        self.on  = GPIO.LOW  if gpio_heat_invert else GPIO.HIGH
+        self.off = GPIO.HIGH if gpio_heat_invert else GPIO.LOW
+        GPIO.setup(self.pin, GPIO.OUT)
+        GPIO.output(self.pin, self.off)
+
+    def heat(self, sleepfor):
+        GPIO.output(self.pin, self.on)
         time.sleep(sleepfor)
 
-    def cool(self,sleepfor):
+    def cool(self, sleepfor):
         '''no active cooling, so sleep'''
-        self.heater.value = self.off
+        GPIO.output(self.pin, self.off)
         time.sleep(sleepfor)
 
 # wrapper for blinka board
@@ -68,21 +83,25 @@ class RealBoard(Board):
     Any blinka board that supports SPI can be used. The
     board is automatically detected by blinka.
     '''
-    def __init__(self):
+    def __init__(self, spi_cs=None):
         self.name = None
+        self.spi_cs = spi_cs
         self.load_libs()
         self.temp_sensor = self.choose_tempsensor()
         Board.__init__(self) 
 
     def load_libs(self):
-        import board
-        self.name = board.board_id
+        try:
+            with open('/proc/device-tree/model', 'r') as f:
+                self.name = f.read().strip().replace('\x00', '')
+        except Exception:
+            self.name = 'Raspberry Pi (unknown model)'
 
     def choose_tempsensor(self):
         if config.max31855:
-            return Max31855()
+            return Max31855(spi_cs=self.spi_cs)
         if config.max31856:
-            return Max31856()
+            return Max31856(spi_cs=self.spi_cs)
 
 class SimulatedBoard(Board):
     '''Simulated board used during simulations.
@@ -117,28 +136,30 @@ class TempSensorReal(TempSensor):
        inputs
            config.temperature_average_samples 
     '''
-    def __init__(self):
+    def __init__(self, spi_cs=None):
         TempSensor.__init__(self)
         self.sleeptime = self.time_step / float(config.temperature_average_samples)
-        self.temptracker = TempTracker() 
+        self.temptracker = TempTracker()
         self.spi_setup()
-        self.cs = digitalio.DigitalInOut(config.spi_cs)
+        if spi_cs is None:
+            spi_cs = config.spi_cs
+        self.cs_pin = spi_cs
+        GPIO.setup(self.cs_pin, GPIO.OUT)
+        GPIO.output(self.cs_pin, GPIO.HIGH)
 
     def spi_setup(self):
-        if(hasattr(config,'spi_sclk') and
-           hasattr(config,'spi_mosi') and
-           hasattr(config,'spi_miso')):
-            self.spi = bitbangio.SPI(config.spi_sclk, config.spi_mosi, config.spi_miso)
-            log.info("Software SPI selected for reading thermocouple")
-        else:
-            import board
-            self.spi = board.SPI();
-            log.info("Hardware SPI selected for reading thermocouple")
+        self.clk_pin  = config.spi_sclk
+        self.miso_pin = config.spi_miso
+        GPIO.setup(self.clk_pin,  GPIO.OUT)
+        GPIO.setup(self.miso_pin, GPIO.IN)
+        GPIO.output(self.clk_pin, GPIO.LOW)
+        log.info("Raw GPIO SPI: CLK=GPIO%d  MISO=GPIO%d" % (self.clk_pin, self.miso_pin))
 
     def get_temperature(self):
         '''read temp from tc and convert if needed'''
         try:
-            temp = self.raw_temp() # raw_temp provided by subclasses
+            with SPI_LOCK:
+                temp = self.raw_temp() # raw_temp provided by subclasses
             if config.temp_scale.lower() == "f":
                 temp = (temp*9/5)+32
             self.status.good()
@@ -212,20 +233,43 @@ class ThermocoupleTracker(object):
         return False
 
 class Max31855(TempSensorReal):
-    '''each subclass expected to handle errors and get temperature'''
-    def __init__(self):
-        TempSensorReal.__init__(self)
-        log.info("thermocouple MAX31855")
-        import adafruit_max31855
-        self.thermocouple = adafruit_max31855.MAX31855(self.spi, self.cs)
+    '''each subclass expected to handle errors and get temperature.
+    Uses raw RPi.GPIO bit-bang SPI — no adafruit/blinka libraries required.
+    '''
+    def __init__(self, spi_cs=None):
+        TempSensorReal.__init__(self, spi_cs=spi_cs)
+        log.info("thermocouple MAX31855 (raw GPIO SPI, CS=GPIO%d)" % self.cs_pin)
+
+    def _read_raw(self):
+        '''Bit-bang 32 bits from the MAX31855 and return the raw integer.'''
+        GPIO.output(self.cs_pin, GPIO.LOW)
+        time.sleep(0.001)
+        raw = 0
+        for _ in range(32):
+            GPIO.output(self.clk_pin, GPIO.HIGH)
+            time.sleep(0.000001)
+            raw = (raw << 1) | GPIO.input(self.miso_pin)
+            GPIO.output(self.clk_pin, GPIO.LOW)
+            time.sleep(0.000001)
+        GPIO.output(self.cs_pin, GPIO.HIGH)
+        return raw
 
     def raw_temp(self):
-        try:
-            return self.thermocouple.temperature_NIST
-        except RuntimeError as rte:
-            if rte.args and rte.args[0]:
-                raise Max31855_Error(rte.args[0])
-            raise Max31855_Error('unknown')
+        raw = self._read_raw()
+        # Fault bit is bit 16
+        if (raw >> 16) & 0x1:
+            if raw & 0x1:
+                raise Max31855_Error("thermocouple not connected")
+            if (raw >> 1) & 0x1:
+                raise Max31855_Error("short circuit to ground")
+            if (raw >> 2) & 0x1:
+                raise Max31855_Error("short circuit to power")
+            raise Max31855_Error("fault reading")
+        # Thermocouple temp: bits 31:18 — 13-bit signed, 0.25°C LSB
+        tc_raw = (raw >> 18) & 0x3FFF
+        if tc_raw & 0x2000:
+            tc_raw -= 0x4000
+        return tc_raw * 0.25
 
 class ThermocoupleError(Exception):
     '''
@@ -299,12 +343,19 @@ class Max31856_Error(ThermocoupleError):
         super().__init__(message)
 
 class Max31856(TempSensorReal):
-    '''each subclass expected to handle errors and get temperature'''
-    def __init__(self):
-        TempSensorReal.__init__(self)
-        log.info("thermocouple MAX31856")
+    '''MAX31856 support requires adafruit-circuitpython-max31856 and blinka.
+    Not used when max31856 = 0 in config.py (default).
+    '''
+    def __init__(self, spi_cs=None):
+        TempSensorReal.__init__(self, spi_cs=spi_cs)
+        log.info("thermocouple MAX31856 (requires adafruit/blinka libraries)")
+        import busio
+        import digitalio
+        import adafruit_bitbangio as bitbangio
         import adafruit_max31856
-        self.thermocouple = adafruit_max31856.MAX31856(self.spi,self.cs,
+        cs = digitalio.DigitalInOut(spi_cs or config.spi_cs)
+        spi = bitbangio.SPI(config.spi_sclk, config.spi_mosi, config.spi_miso)
+        self.thermocouple = adafruit_max31856.MAX31856(spi, cs,
                                         thermocouple_type=config.thermocouple_type)
         if (config.ac_freq_50hz == True):
             self.thermocouple.noise_rejection = 50
@@ -326,11 +377,36 @@ class Max31856(TempSensorReal):
 class Oven(threading.Thread):
     '''parent oven class. this has all the common code
        for either a real or simulated oven'''
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        zone_id=0,
+        zone_name=None,
+        pid_kp=None,
+        pid_ki=None,
+        pid_kd=None,
+        thermocouple_offset=None,
+        automatic_restart_state_file=None,
+    ):
         threading.Thread.__init__(self)
         self.daemon = True
         self.temperature = 0
         self.time_step = config.sensor_time_wait
+
+        self.zone_id = zone_id
+        self.zone_name = zone_name or f"Zone {zone_id + 1}"
+        self.pid_kp = config.pid_kp if pid_kp is None else pid_kp
+        self.pid_ki = config.pid_ki if pid_ki is None else pid_ki
+        self.pid_kd = config.pid_kd if pid_kd is None else pid_kd
+        self.thermocouple_offset = (
+            config.thermocouple_offset if thermocouple_offset is None else thermocouple_offset
+        )
+        self.automatic_restart_state_file = (
+            config.automatic_restart_state_file
+            if automatic_restart_state_file is None
+            else automatic_restart_state_file
+        )
+
         self.reset()
 
     def reset(self):
@@ -344,7 +420,7 @@ class Oven(threading.Thread):
         self.heat = 0
         self.heat_rate = 0
         self.heat_rate_temps = []
-        self.pid = PID(ki=config.pid_ki, kd=config.pid_kd, kp=config.pid_kp)
+        self.pid = PID(ki=self.pid_ki, kd=self.pid_kd, kp=self.pid_kp)
         self.catching_up = False
 
     @staticmethod
@@ -405,8 +481,7 @@ class Oven(threading.Thread):
         '''shift the whole schedule forward in time by one time_step
         to wait for the kiln to catch up'''
         if config.kiln_must_catch_up == True:
-            temp = self.board.temp_sensor.temperature() + \
-                config.thermocouple_offset
+            temp = self.board.temp_sensor.temperature() + self.thermocouple_offset
             # kiln too cold, wait for it to heat up
             if self.target - temp > config.pid_control_window:
                 log.info("kiln must catch up, too cold, shifting schedule")
@@ -434,7 +509,7 @@ class Oven(threading.Thread):
 
     def reset_if_emergency(self):
         '''reset if the temperature is way TOO HOT, or other critical errors detected'''
-        if (self.board.temp_sensor.temperature() + config.thermocouple_offset >=
+        if (self.board.temp_sensor.temperature() + self.thermocouple_offset >=
             config.emergency_shutoff_temp):
             log.info("emergency!!! temperature too high")
             if config.ignore_temp_too_high == False:
@@ -461,15 +536,21 @@ class Oven(threading.Thread):
     def get_state(self):
         temp = 0
         try:
-            temp = self.board.temp_sensor.temperature() + config.thermocouple_offset
+            temp = self.board.temp_sensor.temperature() + self.thermocouple_offset
         except AttributeError as error:
             # this happens at start-up with a simulated oven
             temp = 0
             pass
 
+        # Update runtime to get current elapsed time
+        if self.state == "RUNNING":
+            self.update_runtime()
+
         self.set_heat_rate(self.runtime,temp)
 
         state = {
+            'zone': self.zone_id,
+            'zone_name': self.zone_name,
             'cost': self.cost,
             'runtime': self.runtime,
             'temperature': temp,
@@ -487,7 +568,7 @@ class Oven(threading.Thread):
         return state
 
     def save_state(self):
-        with open(config.automatic_restart_state_file, 'w', encoding='utf-8') as f:
+        with open(self.automatic_restart_state_file, 'w', encoding='utf-8') as f:
             json.dump(self.get_state(), f, ensure_ascii=False, indent=4)
 
     def state_file_is_old(self):
@@ -495,8 +576,8 @@ class Oven(threading.Thread):
                    False if younger
                    True if state file cannot be opened or does not exist
         '''
-        if os.path.isfile(config.automatic_restart_state_file):
-            state_age = os.path.getmtime(config.automatic_restart_state_file)
+        if os.path.isfile(self.automatic_restart_state_file):
+            state_age = os.path.getmtime(self.automatic_restart_state_file)
             now = time.time()
             minutes = (now - state_age)/60
             if(minutes <= config.automatic_restart_window):
@@ -525,7 +606,7 @@ class Oven(threading.Thread):
         return True
 
     def automatic_restart(self):
-        with open(config.automatic_restart_state_file) as infile: d = json.load(infile)
+        with open(self.automatic_restart_state_file) as infile: d = json.load(infile)
         startat = d["runtime"]/60
         filename = "%s.json" % (d["profile"])
         profile_path = os.path.abspath(os.path.join(os.path.dirname( __file__ ), '..', 'storage','profiles',filename))
@@ -571,7 +652,17 @@ class Oven(threading.Thread):
 
 class SimulatedOven(Oven):
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        zone_id=0,
+        zone_name=None,
+        pid_kp=None,
+        pid_ki=None,
+        pid_kd=None,
+        thermocouple_offset=None,
+        automatic_restart_state_file=None,
+    ):
         self.board = SimulatedBoard()
         self.t_env = config.sim_t_env
         self.c_heat = config.sim_c_heat
@@ -586,7 +677,15 @@ class SimulatedOven(Oven):
         self.t = config.sim_t_env  # deg C or F temp of oven
         self.t_h = self.t_env #deg C temp of heating element
 
-        super().__init__()
+        super().__init__(
+            zone_id=zone_id,
+            zone_name=zone_name,
+            pid_kp=pid_kp,
+            pid_ki=pid_ki,
+            pid_kd=pid_kd,
+            thermocouple_offset=thermocouple_offset,
+            automatic_restart_state_file=automatic_restart_state_file,
+        )
 
         self.start_time = self.get_start_time();
 
@@ -634,7 +733,7 @@ class SimulatedOven(Oven):
         now_simulator = self.start_time + datetime.timedelta(milliseconds = self.runtime * 1000)
         pid = self.pid.compute(self.target,
                                self.board.temp_sensor.temperature() +
-                               config.thermocouple_offset, now_simulator)
+                               self.thermocouple_offset, now_simulator)
 
         heat_on = float(self.time_step * pid)
         heat_off = float(self.time_step * (1 - pid))
@@ -679,13 +778,32 @@ class SimulatedOven(Oven):
 
 class RealOven(Oven):
 
-    def __init__(self):
-        self.board = RealBoard()
-        self.output = Output()
-        self.reset()
+    def __init__(
+        self,
+        *,
+        zone_id=0,
+        zone_name=None,
+        spi_cs=None,
+        gpio_heat=None,
+        gpio_heat_invert=None,
+        pid_kp=None,
+        pid_ki=None,
+        pid_kd=None,
+        thermocouple_offset=None,
+        automatic_restart_state_file=None,
+    ):
+        self.board = RealBoard(spi_cs=spi_cs)
+        self.output = Output(gpio_heat=gpio_heat, gpio_heat_invert=gpio_heat_invert)
 
-        # call parent init
-        Oven.__init__(self)
+        super().__init__(
+            zone_id=zone_id,
+            zone_name=zone_name,
+            pid_kp=pid_kp,
+            pid_ki=pid_ki,
+            pid_kd=pid_kd,
+            thermocouple_offset=thermocouple_offset,
+            automatic_restart_state_file=automatic_restart_state_file,
+        )
 
         # start thread
         self.start()
@@ -697,7 +815,7 @@ class RealOven(Oven):
     def heat_then_cool(self):
         pid = self.pid.compute(self.target,
                                self.board.temp_sensor.temperature() +
-                               config.thermocouple_offset, datetime.datetime.now())
+                               self.thermocouple_offset, datetime.datetime.now())
 
         heat_on = float(self.time_step * pid)
         heat_off = float(self.time_step * (1 - pid))

@@ -20,8 +20,8 @@ listening_port = 8081
 # This is used to calculate a cost estimate before a run. It's also used
 # to produce the actual cost during a run. My kiln has three
 # elements that when my switches are set to high, consume 9460 watts.
-kwh_rate        = 0.1319  # cost per kilowatt hour per currency_type to calculate cost to run job
-kw_elements     = 9.460 # if the kiln elements are on, the wattage in kilowatts
+kwh_rate        = 0.1336  # cost per kilowatt hour per currency_type to calculate cost to run job ## bryan - 13.36 cents per kwh in my area as of 2026-03
+kw_elements     = 8.2 # if the kiln elements are on, the wattage in kilowatts ## bryan - 8.2 kw for all 6 elements running.
 currency_type   = "$"   # Currency Symbol to show when calculating cost to run job
 
 ########################################################################
@@ -63,6 +63,7 @@ currency_type   = "$"   # Currency Symbol to show when calculating cost to run j
 #
 # Note that NO pins are configured in this file for hardware spi
 
+# bryan - using software spi
 #######################################
 # SPI pins if you choose software spi #
 #######################################
@@ -82,16 +83,15 @@ currency_type   = "$"   # Currency Symbol to show when calculating cost to run j
 # A single GPIO pin is used to control a relay which controls the kiln.
 # I use GPIO pin 23.
 
-try:
-    import board
-    spi_sclk  = board.D17    #spi clock
-    spi_miso  = board.D27    #spi Microcomputer In Serial Out
-    spi_cs    = board.D22    #spi Chip Select
-    spi_mosi  = board.D10    #spi Microcomputer Out Serial In (not connected) 
-    gpio_heat = board.D23    #output that controls relay
-    gpio_heat_invert = False #invert the output state
-except (NotImplementedError,AttributeError):
-    print("not running on blinka recognized board, probably a simulation")
+# SPI pins — BCM (GPIO) numbers, shared across all zones
+# MAX31855 is read-only; MOSI is not connected but kept for reference
+spi_sclk = 17   # CLK  — physical pin 11
+spi_miso = 27   # DO   — physical pin 13
+spi_cs   = 22   # CS fallback for single-zone / legacy — physical pin 15
+
+# Single-zone legacy relay pin (ignored when zones list is defined below)
+gpio_heat        = 23
+gpio_heat_invert = False
 
 #######################################
 ### Thermocouple breakout boards
@@ -101,9 +101,6 @@ except (NotImplementedError,AttributeError):
 #   max31856 - supports many thermocouples
 max31855 = 1
 max31856 = 0
-# uncomment these two lines if using MAX-31856
-import adafruit_max31856
-thermocouple_type = adafruit_max31856.ThermocoupleType.K
 
 # here are the possible max-31856 thermocouple types
 #   ThermocoupleType.B
@@ -155,7 +152,7 @@ stop_integral_windup = True
 ########################################################################
 #
 #   Simulation parameters
-simulate = True
+simulate = False
 sim_t_env      = 65   # deg
 sim_c_heat     = 500.0  # J/K  heat capacity of heat element
 sim_c_oven     = 5000.0 # J/K  heat capacity of oven
@@ -277,3 +274,82 @@ kiln_profiles_directory = os.path.abspath(os.path.join(os.path.dirname( __file__
 # To prevent throttling, set throttle_percent to 100.
 throttle_below_temp = 300
 throttle_percent = 20
+
+
+
+
+########################################################################
+# Multi-zone (optional)
+#
+# To control multiple independent zones, define `zones` as a list of dicts.
+# Each zone should have its own SSR output pin and its own thermocouple
+# chip-select (CS) pin. SPI SCLK/MISO/MOSI are shared.
+#
+# If `zones` is None/empty, kiln-controller falls back to the legacy
+# single-zone config (gpio_heat + spi_cs).
+#
+# Example (Raspberry Pi / Blinka):
+#
+# zones = None
+# 3-zone config — all pins are BCM (GPIO) numbers.
+# Shared SPI bus: CLK=GPIO17, DO/MISO=GPIO27 (wired to every MAX31855 CLK and DO).
+# Each zone has its own CS pin and SSR relay pin.
+#
+# Current test wiring uses Zone 3 (Bottom): CS=GPIO22, SSR=GPIO23.
+# Wire additional MAX31855 boards to the same CLK/DO lines with different CS pins.
+zones = [
+    {
+        "name": "Zone 1 (Top)",
+        "gpio_heat": 25,       # SSR relay — physical pin 22
+        "gpio_heat_invert": False,
+        "spi_cs": 6,           # MAX31855 CS — physical pin 31
+    },
+    {
+        "name": "Zone 2 (Middle)",
+        "gpio_heat": 24,       # SSR relay — physical pin 18
+        "gpio_heat_invert": False,
+        "spi_cs": 5,           # MAX31855 CS — physical pin 29
+    },
+    {
+        "name": "Zone 3 (Bottom)",
+        "gpio_heat": 23,       # SSR relay — physical pin 16
+        "gpio_heat_invert": False,
+        "spi_cs": 22,          # MAX31855 CS — physical pin 15 (your current test board)
+        # "thermocouple_offset": 0,
+        # "pid_kp": 10,
+        # "pid_ki": 80,
+        # "pid_kd": 220.8,
+    },
+]
+
+########################################################################
+# Environment variable overrides (Docker / containerized deployments)
+#
+# These are evaluated last so they always win over the values above.
+# Supported variables:
+#   KILN_SIMULATE=true|false   override the simulate flag
+#   KILN_PORT=<int>            override listening_port
+########################################################################
+import os as _env_os
+
+_simulate_env = _env_os.environ.get("KILN_SIMULATE", "").strip().lower()
+if _simulate_env in ("1", "true", "yes"):
+    simulate = True
+elif _simulate_env in ("0", "false", "no"):
+    simulate = False
+
+_port_env = _env_os.environ.get("KILN_PORT", "").strip()
+if _port_env:
+    try:
+        listening_port = int(_port_env)
+    except ValueError:
+        pass
+
+# KILN_STATE_DIR — directory where automatic-restart state files are written.
+# Set this to a Docker volume mount so state survives container updates.
+# Default: same directory as config.py (original behaviour).
+_state_dir_env = _env_os.environ.get("KILN_STATE_DIR", "").strip()
+if _state_dir_env:
+    automatic_restart_state_file = _env_os.path.join(
+        _state_dir_env, "state.json"
+    )
