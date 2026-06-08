@@ -41,10 +41,13 @@ services:
     devices:
       - /dev/gpiomem:/dev/gpiomem
 
+    # Use numeric GID for gpio group (name not available inside container).
+    # Find yours on the Pi with: getent group gpio | cut -d: -f3
+    # Common values: 997 (Pi OS Bookworm), 998 (older Pi OS), 986 (this install)
     group_add:
-      - gpio
+      - "986"
 
-    # If group_add causes permission errors, comment it out and use instead:
+    # If still getting permission errors, comment out group_add and use instead:
     # privileged: true
 
     volumes:
