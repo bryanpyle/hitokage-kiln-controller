@@ -83,38 +83,15 @@ currency_type   = "$"   # Currency Symbol to show when calculating cost to run j
 # A single GPIO pin is used to control a relay which controls the kiln.
 # I use GPIO pin 23.
 
-try:
-    import board
-    spi_sclk  = board.D17    #spi clock -- comment out to use hardware SPI
-    spi_miso  = board.D27    #spi Microcomputer In Serial Out -- comment out to use hardware SPI
-    spi_mosi  = board.D10    #spi Microcomputer Out Serial In -- comment out to use hardware SPI
-    spi_cs    = board.D22    #spi Chip Select (any GPIO, stays the same for hw SPI)
-    gpio_heat = board.D23    #output that controls relay
-    gpio_heat_invert = False #invert the output state
-    
-except (NotImplementedError,AttributeError):
-    print("not running on blinka recognized board, probably a simulation")
-    # Create a mock board object for simulation/development
-    class MockBoard:
-        def __init__(self):
-            self.D5 = "GPIO5"
-            self.D6 = "GPIO6"
-            self.D10 = "GPIO10"
-            self.D17 = "GPIO17"
-            self.D22 = "GPIO22"
-            self.D23 = "GPIO23"
-            self.D24 = "GPIO24"
-            self.D25 = "GPIO25"
-            self.D27 = "GPIO27"
-    
-    board = MockBoard()
-    spi_sclk  = board.D17    #spi clock
-    spi_miso  = board.D27    #spi Microcomputer In Serial Out
-    spi_cs    = board.D22    #spi Chip Select
-    spi_mosi  = board.D10    #spi Microcomputer Out Serial In (not connected) 
-    gpio_heat = board.D23    #output that controls relay
-    gpio_heat_invert = False #invert the output state
-    zones = None
+# SPI pins — BCM (GPIO) numbers, shared across all zones
+# MAX31855 is read-only; MOSI is not connected but kept for reference
+spi_sclk = 17   # CLK  — physical pin 11
+spi_miso = 27   # DO   — physical pin 13
+spi_cs   = 22   # CS fallback for single-zone / legacy — physical pin 15
+
+# Single-zone legacy relay pin (ignored when zones list is defined below)
+gpio_heat        = 23
+gpio_heat_invert = False
 
 #######################################
 ### Thermocouple breakout boards
@@ -124,9 +101,6 @@ except (NotImplementedError,AttributeError):
 #   max31856 - supports many thermocouples
 max31855 = 1
 max31856 = 0
-# uncomment these two lines if using MAX-31856
-import adafruit_max31856
-thermocouple_type = adafruit_max31856.ThermocoupleType.K
 
 # here are the possible max-31856 thermocouple types
 #   ThermocoupleType.B
@@ -178,7 +152,7 @@ stop_integral_windup = True
 ########################################################################
 #
 #   Simulation parameters
-simulate = True
+simulate = False
 sim_t_env      = 65   # deg
 sim_c_heat     = 500.0  # J/K  heat capacity of heat element
 sim_c_oven     = 5000.0 # J/K  heat capacity of oven
@@ -317,24 +291,30 @@ throttle_percent = 20
 # Example (Raspberry Pi / Blinka):
 #
 # zones = None
+# 3-zone config — all pins are BCM (GPIO) numbers.
+# Shared SPI bus: CLK=GPIO17, DO/MISO=GPIO27 (wired to every MAX31855 CLK and DO).
+# Each zone has its own CS pin and SSR relay pin.
+#
+# Current test wiring uses Zone 3 (Bottom): CS=GPIO22, SSR=GPIO23.
+# Wire additional MAX31855 boards to the same CLK/DO lines with different CS pins.
 zones = [
     {
-        "name": "Zone 3 (Top)",
-        "gpio_heat": board.D25,
+        "name": "Zone 1 (Top)",
+        "gpio_heat": 25,       # SSR relay — physical pin 22
         "gpio_heat_invert": False,
-        "spi_cs": board.D6,
+        "spi_cs": 6,           # MAX31855 CS — physical pin 31
     },
     {
         "name": "Zone 2 (Middle)",
-        "gpio_heat": board.D24,
+        "gpio_heat": 24,       # SSR relay — physical pin 18
         "gpio_heat_invert": False,
-        "spi_cs": board.D5,
+        "spi_cs": 5,           # MAX31855 CS — physical pin 29
     },
     {
-        "name": "Zone 1 (Bottom)",
-        "gpio_heat": board.D23,
+        "name": "Zone 3 (Bottom)",
+        "gpio_heat": 23,       # SSR relay — physical pin 16
         "gpio_heat_invert": False,
-        "spi_cs": board.D22,
+        "spi_cs": 22,          # MAX31855 CS — physical pin 15 (your current test board)
         # "thermocouple_offset": 0,
         # "pid_kp": 10,
         # "pid_ki": 80,

@@ -5,10 +5,14 @@ import logging
 import json
 import config
 import os
-import digitalio
-import busio
-import adafruit_bitbangio as bitbangio
 import statistics
+
+try:
+    import RPi.GPIO as GPIO
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setwarnings(False)
+except (ImportError, RuntimeError):
+    GPIO = None  # simulation / dev environment
 
 log = logging.getLogger(__name__)
 
@@ -49,18 +53,20 @@ class Output(object):
         if gpio_heat_invert is None:
             gpio_heat_invert = config.gpio_heat_invert
 
-        self.heater = digitalio.DigitalInOut(gpio_heat)
-        self.heater.direction = digitalio.Direction.OUTPUT 
-        self.off = gpio_heat_invert
-        self.on = not self.off
+        self.pin = gpio_heat
+        # gpio_heat_invert=True means the SSR fires on LOW
+        self.on  = GPIO.LOW  if gpio_heat_invert else GPIO.HIGH
+        self.off = GPIO.HIGH if gpio_heat_invert else GPIO.LOW
+        GPIO.setup(self.pin, GPIO.OUT)
+        GPIO.output(self.pin, self.off)
 
-    def heat(self,sleepfor):
-        self.heater.value = self.on
+    def heat(self, sleepfor):
+        GPIO.output(self.pin, self.on)
         time.sleep(sleepfor)
 
-    def cool(self,sleepfor):
+    def cool(self, sleepfor):
         '''no active cooling, so sleep'''
-        self.heater.value = self.off
+        GPIO.output(self.pin, self.off)
         time.sleep(sleepfor)
 
 # wrapper for blinka board
@@ -85,8 +91,11 @@ class RealBoard(Board):
         Board.__init__(self) 
 
     def load_libs(self):
-        import board
-        self.name = board.board_id
+        try:
+            with open('/proc/device-tree/model', 'r') as f:
+                self.name = f.read().strip().replace('\x00', '')
+        except Exception:
+            self.name = 'Raspberry Pi (unknown model)'
 
     def choose_tempsensor(self):
         if config.max31855:
@@ -130,22 +139,21 @@ class TempSensorReal(TempSensor):
     def __init__(self, spi_cs=None):
         TempSensor.__init__(self)
         self.sleeptime = self.time_step / float(config.temperature_average_samples)
-        self.temptracker = TempTracker() 
+        self.temptracker = TempTracker()
         self.spi_setup()
         if spi_cs is None:
             spi_cs = config.spi_cs
-        self.cs = digitalio.DigitalInOut(spi_cs)
+        self.cs_pin = spi_cs
+        GPIO.setup(self.cs_pin, GPIO.OUT)
+        GPIO.output(self.cs_pin, GPIO.HIGH)
 
     def spi_setup(self):
-        if(hasattr(config,'spi_sclk') and
-           hasattr(config,'spi_mosi') and
-           hasattr(config,'spi_miso')):
-            self.spi = bitbangio.SPI(config.spi_sclk, config.spi_mosi, config.spi_miso)
-            log.info("Software SPI selected for reading thermocouple")
-        else:
-            import board
-            self.spi = board.SPI();
-            log.info("Hardware SPI selected for reading thermocouple")
+        self.clk_pin  = config.spi_sclk
+        self.miso_pin = config.spi_miso
+        GPIO.setup(self.clk_pin,  GPIO.OUT)
+        GPIO.setup(self.miso_pin, GPIO.IN)
+        GPIO.output(self.clk_pin, GPIO.LOW)
+        log.info("Raw GPIO SPI: CLK=GPIO%d  MISO=GPIO%d" % (self.clk_pin, self.miso_pin))
 
     def get_temperature(self):
         '''read temp from tc and convert if needed'''
@@ -225,20 +233,43 @@ class ThermocoupleTracker(object):
         return False
 
 class Max31855(TempSensorReal):
-    '''each subclass expected to handle errors and get temperature'''
+    '''each subclass expected to handle errors and get temperature.
+    Uses raw RPi.GPIO bit-bang SPI — no adafruit/blinka libraries required.
+    '''
     def __init__(self, spi_cs=None):
         TempSensorReal.__init__(self, spi_cs=spi_cs)
-        log.info("thermocouple MAX31855")
-        import adafruit_max31855
-        self.thermocouple = adafruit_max31855.MAX31855(self.spi, self.cs)
+        log.info("thermocouple MAX31855 (raw GPIO SPI, CS=GPIO%d)" % self.cs_pin)
+
+    def _read_raw(self):
+        '''Bit-bang 32 bits from the MAX31855 and return the raw integer.'''
+        GPIO.output(self.cs_pin, GPIO.LOW)
+        time.sleep(0.001)
+        raw = 0
+        for _ in range(32):
+            GPIO.output(self.clk_pin, GPIO.HIGH)
+            time.sleep(0.000001)
+            raw = (raw << 1) | GPIO.input(self.miso_pin)
+            GPIO.output(self.clk_pin, GPIO.LOW)
+            time.sleep(0.000001)
+        GPIO.output(self.cs_pin, GPIO.HIGH)
+        return raw
 
     def raw_temp(self):
-        try:
-            return self.thermocouple.temperature_NIST
-        except RuntimeError as rte:
-            if rte.args and rte.args[0]:
-                raise Max31855_Error(rte.args[0])
-            raise Max31855_Error('unknown')
+        raw = self._read_raw()
+        # Fault bit is bit 16
+        if (raw >> 16) & 0x1:
+            if raw & 0x1:
+                raise Max31855_Error("thermocouple not connected")
+            if (raw >> 1) & 0x1:
+                raise Max31855_Error("short circuit to ground")
+            if (raw >> 2) & 0x1:
+                raise Max31855_Error("short circuit to power")
+            raise Max31855_Error("fault reading")
+        # Thermocouple temp: bits 31:18 — 13-bit signed, 0.25°C LSB
+        tc_raw = (raw >> 18) & 0x3FFF
+        if tc_raw & 0x2000:
+            tc_raw -= 0x4000
+        return tc_raw * 0.25
 
 class ThermocoupleError(Exception):
     '''
@@ -312,12 +343,19 @@ class Max31856_Error(ThermocoupleError):
         super().__init__(message)
 
 class Max31856(TempSensorReal):
-    '''each subclass expected to handle errors and get temperature'''
+    '''MAX31856 support requires adafruit-circuitpython-max31856 and blinka.
+    Not used when max31856 = 0 in config.py (default).
+    '''
     def __init__(self, spi_cs=None):
         TempSensorReal.__init__(self, spi_cs=spi_cs)
-        log.info("thermocouple MAX31856")
+        log.info("thermocouple MAX31856 (requires adafruit/blinka libraries)")
+        import busio
+        import digitalio
+        import adafruit_bitbangio as bitbangio
         import adafruit_max31856
-        self.thermocouple = adafruit_max31856.MAX31856(self.spi,self.cs,
+        cs = digitalio.DigitalInOut(spi_cs or config.spi_cs)
+        spi = bitbangio.SPI(config.spi_sclk, config.spi_mosi, config.spi_miso)
+        self.thermocouple = adafruit_max31856.MAX31856(spi, cs,
                                         thermocouple_type=config.thermocouple_type)
         if (config.ac_freq_50hz == True):
             self.thermocouple.noise_rejection = 50
