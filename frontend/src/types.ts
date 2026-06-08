@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Shared TypeScript types for the Vesuvius Kiln Controller
+// Shared TypeScript types for the Hitokage Kiln Controller
 // ---------------------------------------------------------------------------
 
 /** A single [seconds, temperature] data point in a firing profile. */

@@ -150,7 +150,7 @@ docker-logs:
 # Cross-compile from Mac → ARM64 (Pi 4/5) using buildx.
 # Push to a registry then pull on the Pi, or load locally.
 # Replace IMAGE_TAG with your registry path if pushing remotely.
-IMAGE_TAG ?= vesuvius-kiln:arm64
+IMAGE_TAG ?= hitokage-kiln:arm64
 docker-buildx-arm64:
 	docker buildx build \
 		--platform linux/arm64 \

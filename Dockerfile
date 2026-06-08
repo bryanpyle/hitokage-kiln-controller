@@ -15,7 +15,7 @@ RUN npm run build
 # ── Stage 2: Python runtime ────────────────────────────────────────────────────
 FROM python:3.11-slim-bookworm
 
-LABEL org.opencontainers.image.title="Vesuvius Kiln Controller"
+LABEL org.opencontainers.image.title="Hitokage Kiln Controller"
 LABEL org.opencontainers.image.description="FastAPI kiln controller with React SPA"
 
 WORKDIR /app

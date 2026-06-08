@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""FastAPI backend for the Vesuvius Kiln Controller.
+"""FastAPI backend for the Hitokage Kiln Controller.
 
 Replaces kiln-controller.py (bottle/gevent) with a modern async server.
 The PID controller and Oven/Zone logic in lib/ is kept completely intact.
@@ -30,7 +30,7 @@ import config  # noqa: E402 – must come after path setup
 
 logging.basicConfig(level=config.log_level, format=config.log_format)
 log = logging.getLogger("kiln-fastapi")
-log.info("Starting Vesuvius Kiln Controller (FastAPI)")
+log.info("Starting Hitokage Kiln Controller (FastAPI)")
 
 from oven import Profile, RealOven, SimulatedOven  # noqa: E402
 from ovenWatcher import OvenWatcher  # noqa: E402
@@ -177,7 +177,7 @@ async def lifespan(app: FastAPI):
 
 # ── Application ──────────────────────────────────────────────────────────────
 
-app = FastAPI(title="Vesuvius Kiln Controller", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="Hitokage Kiln Controller", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

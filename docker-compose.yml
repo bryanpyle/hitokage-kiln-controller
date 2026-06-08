@@ -15,8 +15,8 @@ services:
       args:
         # Use dev requirements (no RPi.GPIO) for simulation / x86 builds
         REQUIREMENTS: requirements-dev.txt
-    image: vesuvius-kiln:latest
-    container_name: vesuvius-kiln
+    image: hitokage-kiln:latest
+    container_name: hitokage-kiln
     restart: unless-stopped
 
     ports:

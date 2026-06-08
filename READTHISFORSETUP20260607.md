@@ -6,6 +6,87 @@ libraries required for thermocouple reading.
 
 ---
 
+## CI/CD Deployment Flow
+
+```
+git push to main
+      ↓
+GitHub Actions builds ARM64 Docker image
+      ↓
+Image pushed to ghcr.io (GitHub Container Registry)
+      ↓
+Watchtower (running on Pi) polls every 5 min
+      ↓
+New image detected → pulls → restarts kiln container automatically
+```
+
+No SSH keys in GitHub. No inbound ports on the Pi. No manual steps after a push.
+
+### One-time GitHub setup
+
+**1. Make the package public** (or keep private and use a PAT):
+
+After the first Actions run, go to `github.com/<you>/<repo>/pkgs/container/hitokage-kiln-controller`
+and set visibility to **Public** — then the Pi can pull without credentials.
+
+For a private repo, create a Personal Access Token with `read:packages` scope at
+`https://github.com/settings/tokens` and log in on the Pi:
+
+```bash
+echo <YOUR_PAT> | docker login ghcr.io -u <YOUR_GITHUB_USERNAME> --password-stdin
+```
+
+**2. Set your image name** in a `.env` file on the Pi (next to `docker-compose.deploy.yml`):
+
+```bash
+echo "IMAGE=ghcr.io/<your-github-username>/hitokage-kiln-controller:latest" > .env
+```
+
+### One-time Pi setup
+
+```bash
+# Install Docker
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+sudo usermod -aG gpio $USER
+# Log out and back in
+
+# Start the kiln + Watchtower
+cd ~/hitokage-kiln-controller
+docker compose -f docker-compose.deploy.yml up -d
+```
+
+### After that — deploy is automatic
+
+Push to `main` → Actions builds → Watchtower deploys within 5 minutes.
+
+To check Watchtower activity:
+```bash
+docker logs watchtower
+```
+
+To force an immediate update:
+```bash
+docker compose -f docker-compose.deploy.yml pull
+docker compose -f docker-compose.deploy.yml up -d
+```
+
+To roll back to a specific build (every push is tagged `sha-<short>`):
+```bash
+# Find available tags at: ghcr.io/<you>/hitokage-kiln-controller
+IMAGE=ghcr.io/<you>/hitokage-kiln-controller:sha-abc1234 \
+  docker compose -f docker-compose.deploy.yml up -d
+```
+
+### Files created
+
+| File | Purpose |
+|---|---|
+| [.github/workflows/build-pi.yml](.github/workflows/build-pi.yml) | GitHub Actions — builds ARM64 image, pushes to ghcr.io |
+| [docker-compose.deploy.yml](docker-compose.deploy.yml) | Pi production compose — pulls from registry + Watchtower |
+
+---
+
 ## All Pins at a Glance
 
 **10 Pi pins total.** CLK and DO fan out to all 3 boards — run one wire from each to all three MAX31855 CLK/DO terminals. Everything else is point-to-point.

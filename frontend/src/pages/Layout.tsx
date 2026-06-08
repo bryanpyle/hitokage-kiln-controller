@@ -21,7 +21,7 @@ export default function Layout() {
         <Toolbar>
           <WhatshotIcon color="primary" sx={{ mr: 1 }} />
           <Typography variant="h6" sx={{ flexGrow: 0, mr: 4, fontWeight: 700 }}>
-            Vesuvius Kiln
+            Hitokage Kiln
           </Typography>
 
           <Tabs value={tabValue} textColor="primary" indicatorColor="primary">
