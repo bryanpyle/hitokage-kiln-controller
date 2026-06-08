@@ -6,6 +6,33 @@ libraries required for thermocouple reading.
 
 ---
 
+## All Pins at a Glance
+
+**10 Pi pins total.** CLK and DO fan out to all 3 boards — run one wire from each to all three MAX31855 CLK/DO terminals. Everything else is point-to-point.
+
+| Physical Pin | BCM GPIO | Signal | Connects to |
+|---|---|---|---|
+| Pin 1 | 3.3V | Power | VIN on **all 3** MAX31855 boards |
+| Pin 6 | GND | Ground | GND on **all 3** MAX31855 boards + SSR ground ref |
+| Pin 11 | GPIO 17 | CLK (shared) | CLK on **all 3** MAX31855 boards |
+| Pin 13 | GPIO 27 | DO/MISO (shared) | DO on **all 3** MAX31855 boards |
+| Pin 15 | GPIO 22 | Zone 3 CS | CS on Zone 3 (Bottom) MAX31855 |
+| Pin 16 | GPIO 23 | Zone 3 SSR | Signal on Zone 3 SSR |
+| Pin 18 | GPIO 24 | Zone 2 SSR | Signal on Zone 2 SSR |
+| Pin 22 | GPIO 25 | Zone 1 SSR | Signal on Zone 1 SSR |
+| Pin 29 | GPIO 5 | Zone 2 CS | CS on Zone 2 (Middle) MAX31855 |
+| Pin 31 | GPIO 6 | Zone 1 CS | CS on Zone 1 (Top) MAX31855 |
+
+**Per MAX31855 board:**
+
+| Board | VIN | GND | CLK | DO | CS |
+|---|---|---|---|---|---|
+| Zone 1 (Top) | Pin 1 | Pin 6 | Pin 11 | Pin 13 | Pin 31 |
+| Zone 2 (Middle) | Pin 1 | Pin 6 | Pin 11 | Pin 13 | Pin 29 |
+| Zone 3 (Bottom) | Pin 1 | Pin 6 | Pin 11 | Pin 13 | Pin 15 |
+
+---
+
 ## Why raw GPIO instead of adafruit/blinka?
 
 The adafruit-circuitpython-bitbangio library had intermittent timing issues on the Pi Zero 2 W
