@@ -225,7 +225,7 @@ ac_freq_50hz = False
 # You should only set these to True if you experience a problem
 # and WANT to ignore it to complete a firing.
 ignore_temp_too_high = False
-ignore_tc_lost_connection = False
+ignore_tc_lost_connection = True
 ignore_tc_cold_junction_range_error = False
 ignore_tc_range_error = False
 ignore_tc_cold_junction_temp_high = False
@@ -289,19 +289,9 @@ throttle_percent = 20
 # Example (Raspberry Pi / Blinka):
 #
 # zones = None
-# 3-zone config — all pins are BCM (GPIO) numbers.
-# Shared SPI bus: CLK=GPIO17, DO/MISO=GPIO27 (wired to every MAX31855 CLK and DO).
-# Each zone has its own CS pin and SSR relay pin.
-#
-# Current test wiring uses Zone 3 (Bottom): CS=GPIO22, SSR=GPIO23.
-# Wire additional MAX31855 boards to the same CLK/DO lines with different CS pins.
+# 2-zone config — Zone 2 (Middle) and Zone 3 (Bottom) are wired.
+# Shared SPI bus: CLK=GPIO17, DO/MISO=GPIO27.
 zones = [
-    {
-        "name": "Zone 1 (Top)",
-        "gpio_heat": 25,       # SSR relay — physical pin 22
-        "gpio_heat_invert": False,
-        "spi_cs": 6,           # MAX31855 CS — physical pin 31
-    },
     {
         "name": "Zone 2 (Middle)",
         "gpio_heat": 24,       # SSR relay — physical pin 18
@@ -312,7 +302,7 @@ zones = [
         "name": "Zone 3 (Bottom)",
         "gpio_heat": 23,       # SSR relay — physical pin 16
         "gpio_heat_invert": False,
-        "spi_cs": 22,          # MAX31855 CS — physical pin 15 (your current test board)
+        "spi_cs": 22,          # MAX31855 CS — physical pin 15
         # "thermocouple_offset": 0,
         # "pid_kp": 10,
         # "pid_ki": 80,
