@@ -291,7 +291,33 @@ throttle_percent = 20
 # zones = None
 # 2-zone config — Zone 2 (Middle) and Zone 3 (Bottom) are wired.
 # Shared SPI bus: CLK=GPIO17, DO/MISO=GPIO27.
+# zones = [
+#     {
+#         "name": "Zone 2 (Middle)",
+#         "gpio_heat": 24,       # SSR relay — physical pin 18
+#         "gpio_heat_invert": False,
+#         "spi_cs": 5,           # MAX31855 CS — physical pin 29
+#     },
+#     {
+#         "name": "Zone 3 (Bottom)",
+#         "gpio_heat": 23,       # SSR relay — physical pin 16
+#         "gpio_heat_invert": False,
+#         "spi_cs": 22,          # MAX31855 CS — physical pin 15
+#         # "thermocouple_offset": 0,
+#         # "pid_kp": 10,
+#         # "pid_ki": 80,
+#         # "pid_kd": 220.8,
+#     },
+# ]
+
+
 zones = [
+    {
+        "name": "Zone 1 (Top)",
+        "gpio_heat": 25,       # SSR relay — physical pin 22
+        "gpio_heat_invert": False,
+        "spi_cs": 6,           # MAX31855 CS — physical pin 31
+    },
     {
         "name": "Zone 2 (Middle)",
         "gpio_heat": 24,       # SSR relay — physical pin 18
@@ -302,7 +328,7 @@ zones = [
         "name": "Zone 3 (Bottom)",
         "gpio_heat": 23,       # SSR relay — physical pin 16
         "gpio_heat_invert": False,
-        "spi_cs": 22,          # MAX31855 CS — physical pin 15
+        "spi_cs": 22,          # MAX31855 CS — physical pin 15 (your current test board)
         # "thermocouple_offset": 0,
         # "pid_kp": 10,
         # "pid_ki": 80,
