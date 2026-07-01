@@ -67,3 +67,17 @@ export function sendControl(payload: ControlPayload): Promise<{ success: boolean
     body: JSON.stringify(payload),
   });
 }
+
+// Relay --------------------------------------------------------------------
+
+export interface RelayPayload {
+  zone?: number;
+  on: boolean;
+}
+
+export function sendRelay(payload: RelayPayload): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>("/relay", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}

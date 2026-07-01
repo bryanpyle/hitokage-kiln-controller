@@ -1,10 +1,13 @@
+import { useState } from "react";
 import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
 import Card from "@mui/material/Card";
 import CardContent from "@mui/material/CardContent";
 import Chip from "@mui/material/Chip";
 import Divider from "@mui/material/Divider";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
+import { sendRelay } from "../api/http";
 import type { OvenState } from "../types";
 
 interface ZoneCardProps {
@@ -23,7 +26,23 @@ function formatTemp(temp: number, scale: "c" | "f"): string {
 }
 
 export default function ZoneCard({ state, tempScale }: ZoneCardProps) {
+  const [relayBusy, setRelayBusy] = useState(false);
+  const [relayError, setRelayError] = useState("");
+
   const isHeating = state.heat > 0;
+  const isIdle = state.state === "IDLE";
+
+  async function toggleRelay(on: boolean) {
+    setRelayError("");
+    setRelayBusy(true);
+    try {
+      await sendRelay({ zone: state.zone, on });
+    } catch (e) {
+      setRelayError(String(e));
+    } finally {
+      setRelayBusy(false);
+    }
+  }
 
   return (
     <Card
@@ -93,6 +112,41 @@ export default function ZoneCard({ state, tempScale }: ZoneCardProps) {
             {state.heat_rate.toFixed(0)} °/h
           </Typography>
         </Box>
+
+        {/* Manual relay toggle — only available when IDLE */}
+        {isIdle && (
+          <>
+            <Divider sx={{ my: 1 }} />
+            <Box display="flex" alignItems="center" gap={1} mt={1}>
+              <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
+                Relay:
+              </Typography>
+              <Button
+                size="small"
+                variant={isHeating ? "contained" : "outlined"}
+                color="warning"
+                disabled={relayBusy || isHeating}
+                onClick={() => toggleRelay(true)}
+              >
+                ON
+              </Button>
+              <Button
+                size="small"
+                variant={!isHeating ? "contained" : "outlined"}
+                color="inherit"
+                disabled={relayBusy || !isHeating}
+                onClick={() => toggleRelay(false)}
+              >
+                OFF
+              </Button>
+            </Box>
+            {relayError && (
+              <Typography variant="caption" color="error" display="block" mt={0.5}>
+                {relayError}
+              </Typography>
+            )}
+          </>
+        )}
       </CardContent>
     </Card>
   );

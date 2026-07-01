@@ -3,6 +3,7 @@ import time
 import datetime
 import logging
 import json
+from abc import ABC, abstractmethod
 import config
 import os
 import statistics
@@ -388,7 +389,7 @@ class Max31856(TempSensorReal):
                 raise Max31856_Error(k)
         return temp
 
-class Oven(threading.Thread):
+class Oven(threading.Thread, ABC):
     '''parent oven class. this has all the common code
        for either a real or simulated oven'''
     def __init__(
@@ -638,6 +639,16 @@ class Oven(threading.Thread):
         log.info("ovenwatcher set in oven class")
         self.ovenwatcher = watcher
 
+    def force_relay(self, on: bool):
+        """Manually toggle the relay. Only permitted when IDLE."""
+        if self.state != "IDLE":
+            raise ValueError("Cannot manually toggle relay while kiln is not IDLE")
+        self.heat = 1.0 if on else 0.0
+
+    @abstractmethod
+    def heat_then_cool(self):
+        """Drive the heating element for one time step. Implemented by subclasses."""
+
     def run(self):
         while True:
             log.debug('Oven running on ' + threading.current_thread().name)
@@ -825,6 +836,17 @@ class RealOven(Oven):
     def reset(self):
         super().reset()
         self.output.cool(0)
+
+    def force_relay(self, on: bool):
+        """Manually toggle the GPIO relay. Only permitted when IDLE."""
+        if self.state != "IDLE":
+            raise ValueError("Cannot manually toggle relay while kiln is not IDLE")
+        if on:
+            self.output.heat(0)
+            self.heat = 1.0
+        else:
+            self.output.cool(0)
+            self.heat = 0.0
 
     def heat_then_cool(self):
         pid = self.pid.compute(self.target,

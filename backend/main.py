@@ -370,6 +370,24 @@ def api_control(body: ControlCommand):
     return {"success": True}
 
 
+# ── REST: manual relay toggle ─────────────────────────────────────────────────
+
+
+class RelayCommand(BaseModel):
+    zone: int = 0
+    on: bool
+
+
+@app.post("/api/relay")
+def api_relay(body: RelayCommand):
+    oven = _get_oven(body.zone)
+    try:
+        oven.force_relay(body.on)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"success": True}
+
+
 # ── WebSocket: real-time oven status ─────────────────────────────────────────
 
 

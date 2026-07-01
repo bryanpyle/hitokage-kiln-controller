@@ -9,6 +9,8 @@ import Toolbar from "@mui/material/Toolbar";
 import Typography from "@mui/material/Typography";
 import WhatshotIcon from "@mui/icons-material/Whatshot";
 
+declare const __APP_VERSION__: string;
+
 export default function Layout() {
   const location = useLocation();
 
@@ -38,6 +40,15 @@ export default function Layout() {
       <Container maxWidth="xl" sx={{ py: 3, flex: 1 }}>
         <Outlet />
       </Container>
+
+      <Box
+        component="footer"
+        sx={{ py: 1, textAlign: "center", borderTop: 1, borderColor: "divider" }}
+      >
+        <Typography variant="caption" color="text.disabled">
+          v{__APP_VERSION__}
+        </Typography>
+      </Box>
     </Box>
   );
 }
