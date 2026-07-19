@@ -53,6 +53,7 @@ class Duplogger():
 
 duplog = Duplogger().logref()
 
+
 class Output(object):
     '''This represents a GPIO output that controls a solid
     state relay to turn the kiln elements on and off.
