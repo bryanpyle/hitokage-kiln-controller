@@ -31,6 +31,22 @@ export default function DashboardPage() {
   // Single hook manages all zone WebSocket connections
   const zoneData = useAllZonesWebSocket(zoneIds);
 
+  // Representative state for control panel button logic (first non-IDLE zone wins)
+  const anyZoneState: OvenState | null =
+    zoneIds
+      .map((id) => zoneData[id]?.state)
+      .find((s): s is OvenState => !!s && s.state !== "IDLE") ??
+    zoneData[zoneIds[0]]?.state ??
+    null;
+
+  // Sync selectedProfile to running profile when kiln is active
+  const runningProfileName = anyZoneState?.profile ?? null;
+  useEffect(() => {
+    if (runningProfileName && anyZoneState?.state !== "IDLE") {
+      setSelectedProfile(runningProfileName);
+    }
+  }, [runningProfileName, anyZoneState?.state]);
+
   if (!config) {
     return (
       <Box>
@@ -41,24 +57,8 @@ export default function DashboardPage() {
     );
   }
 
-  // Representative state for control panel button logic (first non-IDLE zone wins)
-  const anyZoneState: OvenState | null =
-    zoneIds
-      .map((id) => zoneData[id]?.state)
-      .find((s): s is OvenState => !!s && s.state !== "IDLE") ??
-    zoneData[zoneIds[0]]?.state ??
-    null;
-
   // Aggregated chart data across all zones
   const { chartData, scheduleData: wsScheduleData } = buildMultiZoneChartData(zoneData, zoneIds);
-
-  // Sync selectedProfile to running profile when kiln is active
-  const runningProfileName = anyZoneState?.profile ?? null;
-  useEffect(() => {
-    if (runningProfileName && anyZoneState?.state !== "IDLE") {
-      setSelectedProfile(runningProfileName);
-    }
-  }, [runningProfileName, anyZoneState?.state]);
 
   // Show schedule from: WS backlog > running profile fallback > selected (idle preview)
   const scheduleData = wsScheduleData.length > 0
