@@ -24,6 +24,10 @@ interface ControlPanelProps {
   /** All zone states — used to compute aggregate run cost. */
   allZoneStates: OvenState[];
   profiles: FiringProfile[];
+  /** Lifted state: the currently selected profile name. */
+  selectedProfile: string;
+  /** Callback to update selected profile in parent. */
+  onProfileChange: (name: string) => void;
 }
 
 function formatRuntime(seconds: number): string {
@@ -40,8 +44,9 @@ export default function ControlPanel({
   anyZoneState,
   allZoneStates,
   profiles,
+  selectedProfile,
+  onProfileChange,
 }: ControlPanelProps) {
-  const [selectedProfile, setSelectedProfile] = useState("");
   const [startat, setStartat] = useState("0");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -55,7 +60,7 @@ export default function ControlPanel({
   // refresh when the kiln is already mid-run).
   useEffect(() => {
     if (anyZoneState?.profile && anyZoneState.state !== "IDLE") {
-      setSelectedProfile(anyZoneState.profile);
+      onProfileChange(anyZoneState.profile);
     }
   }, [anyZoneState?.profile, anyZoneState?.state]);
 
@@ -101,7 +106,7 @@ export default function ControlPanel({
             labelId="profile-label-all"
             value={selectedProfile}
             label="Firing Profile"
-            onChange={(e) => setSelectedProfile(e.target.value)}
+            onChange={(e) => onProfileChange(e.target.value)}
             disabled={!isIdle || busy}
           >
             {profiles.map((p) => (

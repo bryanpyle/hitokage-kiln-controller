@@ -60,7 +60,7 @@ export default function FiringChart({
       {merged.length === 0 ? (
         <Box display="flex" height={340} alignItems="center" justifyContent="center">
           <Typography color="text.secondary">
-            Start a firing profile to see the chart
+            Select a firing profile to see the schedule
           </Typography>
         </Box>
       ) : (

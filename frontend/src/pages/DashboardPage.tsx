@@ -18,6 +18,7 @@ import type { FiringProfile, KilnConfig, OvenState } from "../types";
 export default function DashboardPage() {
   const [config, setConfig] = useState<KilnConfig | null>(null);
   const [profiles, setProfiles] = useState<FiringProfile[]>([]);
+  const [selectedProfile, setSelectedProfile] = useState("");
 
   useEffect(() => {
     fetchConfig().then(setConfig).catch(console.error);
@@ -51,15 +52,21 @@ export default function DashboardPage() {
   // Aggregated chart data across all zones
   const { chartData, scheduleData: wsScheduleData } = buildMultiZoneChartData(zoneData, zoneIds);
 
-  // If the WS backlog hasn't delivered the active profile yet (e.g. run was
-  // started from the UI without a page reload), fall back to the HTTP-fetched
-  // profiles list using the profile name already present in OvenState.
+  // Sync selectedProfile to running profile when kiln is active
   const runningProfileName = anyZoneState?.profile ?? null;
+  useEffect(() => {
+    if (runningProfileName && anyZoneState?.state !== "IDLE") {
+      setSelectedProfile(runningProfileName);
+    }
+  }, [runningProfileName, anyZoneState?.state]);
+
+  // Show schedule from: WS backlog > running profile fallback > selected (idle preview)
   const scheduleData = wsScheduleData.length > 0
     ? wsScheduleData
     : (() => {
-        if (!runningProfileName) return [];
-        const found = profiles.find((p) => p.name === runningProfileName);
+        const name = runningProfileName ?? selectedProfile;
+        if (!name) return [];
+        const found = profiles.find((p) => p.name === name);
         return found ? profileToSchedulePoints(found) : [];
       })();
 
@@ -91,6 +98,8 @@ export default function DashboardPage() {
         anyZoneState={anyZoneState}
         allZoneStates={allZoneStates}
         profiles={profiles}
+        selectedProfile={selectedProfile}
+        onProfileChange={setSelectedProfile}
       />
 
       {/* ── 2. Zone status cards (side by side) ── */}
