@@ -74,8 +74,6 @@ services:
       - WATCHTOWER_POLL_INTERVAL=300
       # Remove old images after updating to keep disk free
       - WATCHTOWER_CLEANUP=true
-      # Send a notification to the log when an update happens
-      - WATCHTOWER_NOTIFICATIONS=log
 
 volumes:
   kiln-profiles:
