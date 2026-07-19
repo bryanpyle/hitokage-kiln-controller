@@ -109,7 +109,7 @@ export default function DashboardPage() {
           return (
             <Grid key={zone.id} size={{ xs: 12, sm: 6, lg: 4 }}>
               {zd?.state ? (
-                <ZoneCard state={zd.state} tempScale={config.temp_scale} />
+                <ZoneCard state={zd.state} tempScale={config.temp_scale} heatOnSeconds={zd.heatOnSeconds} />
               ) : (
                 <Skeleton variant="rectangular" height={240} sx={{ borderRadius: 2 }} />
               )}

@@ -27,6 +27,26 @@ export interface ZoneWsData {
   liveLog: OvenState[];
   activeProfile: FiringProfile | null;
   connected: boolean;
+  /** Cumulative seconds the heating element was ON during the current/last run. */
+  heatOnSeconds: number;
+}
+
+/** Compute cumulative heat-on seconds from a log of ordered OvenState entries. */
+function computeHeatOnFromLog(log: OvenState[]): number {
+  let total = 0;
+  for (let i = 1; i < log.length; i++) {
+    if (log[i - 1].heat > 0 && log[i - 1].state !== "IDLE") {
+      total += Math.max(0, log[i].runtime - log[i - 1].runtime);
+    }
+  }
+  return total;
+}
+
+interface HeatTracker {
+  accumulated: number;
+  prevHeat: number;
+  prevRuntime: number;
+  prevKilnState: string;
 }
 
 // ── Single-zone hook ─────────────────────────────────────────────────────────
@@ -139,13 +159,14 @@ export function useAllZonesWebSocket(
   const [zoneData, setZoneData] = useState<Record<number, ZoneWsData>>(() => {
     const init: Record<number, ZoneWsData> = {};
     for (const id of zoneIds) {
-      init[id] = { state: null, liveLog: [], activeProfile: null, connected: false };
+      init[id] = { state: null, liveLog: [], activeProfile: null, connected: false, heatOnSeconds: 0 };
     }
     return init;
   });
 
   const wsMap = useRef<Map<number, WebSocket>>(new Map());
   const timerMap = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  const heatTrackers = useRef<Map<number, HeatTracker>>(new Map());
   // Stable ref so connect callbacks can always see fresh zoneIds
   const zoneIdsRef = useRef(zoneIds);
   zoneIdsRef.current = zoneIds;
@@ -182,20 +203,48 @@ export function useAllZonesWebSocket(
 
         if (msg.type === "backlog") {
           const b = msg as BacklogMessage;
+          const log = (b.log ?? []) as OvenState[];
+          const seeded = computeHeatOnFromLog(log);
+          const last = log[log.length - 1];
+          heatTrackers.current.set(zoneId, {
+            accumulated: seeded,
+            prevHeat: last?.heat ?? 0,
+            prevRuntime: last?.runtime ?? 0,
+            prevKilnState: last?.state ?? "IDLE",
+          });
           setZoneData((prev) => ({
             ...prev,
             [zoneId]: {
               ...prev[zoneId],
               activeProfile: b.profile ? (b.profile as FiringProfile) : prev[zoneId].activeProfile,
-              liveLog: b.log ?? [],
+              liveLog: log,
+              heatOnSeconds: seeded,
             },
           }));
           return;
         }
 
         const s = msg as OvenState;
+        // Accumulate heat-on time
+        const tracker = heatTrackers.current.get(zoneId) ?? {
+          accumulated: 0, prevHeat: 0, prevRuntime: 0, prevKilnState: "IDLE",
+        };
+        let newAccumulated = tracker.accumulated;
+        if (s.state === "IDLE" && tracker.prevKilnState !== "IDLE") {
+          // Run just ended — reset for next firing
+          newAccumulated = 0;
+        } else if (tracker.prevHeat > 0 && tracker.prevKilnState !== "IDLE") {
+          newAccumulated += Math.max(0, s.runtime - tracker.prevRuntime);
+        }
+        heatTrackers.current.set(zoneId, {
+          accumulated: newAccumulated,
+          prevHeat: s.heat,
+          prevRuntime: s.runtime,
+          prevKilnState: s.state,
+        });
+
         setZoneData((prev) => {
-          const prevZone = prev[zoneId] ?? { state: null, liveLog: [], activeProfile: null, connected: true };
+          const prevZone = prev[zoneId] ?? { state: null, liveLog: [], activeProfile: null, connected: true, heatOnSeconds: 0 };
           const next = [...prevZone.liveLog, s];
           return {
             ...prev,
@@ -203,6 +252,7 @@ export function useAllZonesWebSocket(
               ...prevZone,
               state: s,
               liveLog: next.length > MAX_LOG_POINTS ? next.slice(next.length - MAX_LOG_POINTS) : next,
+              heatOnSeconds: newAccumulated,
             },
           };
         });

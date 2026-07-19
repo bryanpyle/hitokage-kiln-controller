@@ -13,6 +13,16 @@ import type { OvenState } from "../types";
 interface ZoneCardProps {
   state: OvenState;
   tempScale: "c" | "f";
+  heatOnSeconds: number;
+}
+
+function formatDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
 }
 
 const STATE_COLORS: Record<string, "default" | "success" | "warning" | "error"> = {
@@ -25,7 +35,7 @@ function formatTemp(temp: number, scale: "c" | "f"): string {
   return `${Math.round(temp)} °${scale.toUpperCase()}`;
 }
 
-export default function ZoneCard({ state, tempScale }: ZoneCardProps) {
+export default function ZoneCard({ state, tempScale, heatOnSeconds }: ZoneCardProps) {
   const [relayBusy, setRelayBusy] = useState(false);
   const [relayError, setRelayError] = useState("");
 
@@ -103,14 +113,28 @@ export default function ZoneCard({ state, tempScale }: ZoneCardProps) {
 
         <Divider sx={{ my: 1 }} />
 
-        {/* Heat rate — zone-specific, kept here */}
-        <Box mt={1}>
-          <Typography variant="caption" color="text.secondary" display="block">
-            Heat Rate
-          </Typography>
-          <Typography variant="body2">
-            {state.heat_rate.toFixed(0)} °/h
-          </Typography>
+        {/* Heat rate + heat-on timer */}
+        <Box mt={1} display="flex" gap={4}>
+          <Box>
+            <Typography variant="caption" color="text.secondary" display="block">
+              Heat Rate
+            </Typography>
+            <Typography variant="body2">
+              {state.heat_rate.toFixed(0)} °/h
+            </Typography>
+          </Box>
+          {state.state !== "IDLE" && (
+            <Tooltip title="Total time the heating element has been ON this firing">
+              <Box>
+                <Typography variant="caption" color="text.secondary" display="block">
+                  Heat On Time
+                </Typography>
+                <Typography variant="body2" color={heatOnSeconds > 0 ? "warning.light" : "text.primary"}>
+                  {formatDuration(heatOnSeconds)}
+                </Typography>
+              </Box>
+            </Tooltip>
+          )}
         </Box>
 
         {/* Manual relay toggle — only available when IDLE */}
