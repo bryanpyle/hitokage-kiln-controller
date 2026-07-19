@@ -105,7 +105,7 @@ export function useOvenWebSocket(zone: number): UseOvenWsReturn {
     };
   }, [connect]);
 
-  return { state, liveLog, activeProfile, connected };
+  return { state, liveLog, activeProfile, connected, heatOnSeconds: 0 };
 }
 
 // ── Multi-zone chart helpers ─────────────────────────────────────────────────
