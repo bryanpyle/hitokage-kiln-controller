@@ -8,11 +8,19 @@ import Tabs from "@mui/material/Tabs";
 import Toolbar from "@mui/material/Toolbar";
 import Typography from "@mui/material/Typography";
 import WhatshotIcon from "@mui/icons-material/Whatshot";
+import { useEffect, useState } from "react";
+import { fetchConfig } from "../api/http";
+import type { KilnConfig } from "../types";
 
 declare const __APP_VERSION__: string;
 
 export default function Layout() {
   const location = useLocation();
+  const [kilnConfig, setKilnConfig] = useState<KilnConfig | null>(null);
+
+  useEffect(() => {
+    fetchConfig().then(setKilnConfig).catch(console.error);
+  }, []);
 
   // Map pathname → tab index
   const tabValue = location.pathname.startsWith("/profiles") ? 1 : 0;
@@ -33,7 +41,9 @@ export default function Layout() {
 
           <Box flexGrow={1} />
 
-          <Chip label="SIMULATOR" size="small" color="warning" sx={{ fontWeight: 600 }} />
+          {kilnConfig?.simulate && (
+            <Chip label="SIMULATOR" size="small" color="warning" sx={{ fontWeight: 600 }} />
+          )}
         </Toolbar>
       </AppBar>
 

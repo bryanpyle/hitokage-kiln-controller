@@ -272,6 +272,7 @@ def api_config():
         "kwh_rate": config.kwh_rate,
         "currency_type": config.currency_type,
         "zones": [{"id": z["id"], "name": z["name"]} for z in ZONE_CONFIGS],
+        "simulate": config.simulate,
     }
 
 

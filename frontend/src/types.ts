@@ -74,6 +74,7 @@ export interface KilnConfig {
   kwh_rate: number;
   currency_type: string;
   zones: ZoneConfig[];
+  simulate: boolean;
 }
 
 /** A chart data point used by Recharts.
