@@ -7,6 +7,11 @@ WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --frozen-lockfile
 
+# BUILD_VERSION is injected by CI (e.g. "2.0.0-sha-abc1234").
+# Falls back to the version in package.json when building locally.
+ARG BUILD_VERSION=
+ENV BUILD_VERSION=${BUILD_VERSION}
+
 # Build the SPA
 COPY frontend/ ./
 RUN npm run build

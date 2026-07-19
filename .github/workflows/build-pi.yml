@@ -64,6 +64,10 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=sha-,format=short
 
+      - name: Generate build timestamp
+        id: ts
+        run: echo "value=$(date -u +'%Y%m%d-%H%M%S')" >> "$GITHUB_OUTPUT"
+
       - name: Build and push ARM64 image
         uses: docker/build-push-action@v6
         with:
@@ -75,6 +79,7 @@ jobs:
           build-args: |
             REQUIREMENTS=requirements.txt
             INSTALL_GPIO_LIBS=1
+            BUILD_VERSION=2.0.0-${{ steps.meta.outputs.version }}-${{ steps.ts.outputs.value }}
           # Cache layers in the GitHub Actions cache to speed up rebuilds
           cache-from: type=gha
           cache-to: type=gha,mode=max

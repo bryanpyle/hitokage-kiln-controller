@@ -3,6 +3,8 @@ import react from "@vitejs/plugin-react";
 import { readFileSync } from "fs";
 
 const { version } = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf-8"));
+// Use BUILD_VERSION from CI if provided (e.g. "2.0.0-sha-abc1234"), else package.json version.
+const appVersion = process.env.BUILD_VERSION || version;
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -28,6 +30,6 @@ export default defineConfig({
     sourcemap: true,
   },
   define: {
-    __APP_VERSION__: JSON.stringify(version),
+    __APP_VERSION__: JSON.stringify(appVersion),
   },
 });
