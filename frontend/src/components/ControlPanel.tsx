@@ -71,9 +71,15 @@ export default function ControlPanel({
   const profileName = anyZoneState?.profile ?? null;
   const catchingUp = anyZoneState?.catching_up ?? false;
 
-  // Aggregate run cost across all zones
+  // Aggregate run cost and energy across all zones
   const totalCost = allZoneStates.reduce((sum, s) => sum + (s?.cost ?? 0), 0);
+  const totalWh = allZoneStates.reduce((sum, s) => sum + (s?.wh ?? 0), 0);
   const currencyType = anyZoneState?.currency_type ?? "$";
+
+  function formatEnergy(wh: number): string {
+    if (wh < 1000) return `${Math.round(wh)} Wh`;
+    return `${(wh / 1000).toFixed(2)} kWh`;
+  }
 
   async function dispatch(cmd: "run" | "stop" | "pause" | "resume") {
     setError("");
@@ -209,14 +215,24 @@ export default function ControlPanel({
               </Box>
             </Box>
 
-            {/* Aggregate cost */}
-            <Box textAlign="right" sx={{ whiteSpace: "nowrap" }}>
-              <Typography variant="caption" color="text.secondary" display="block">
-                Total Run Cost
-              </Typography>
-              <Typography variant="h6" fontWeight={700} color="text.primary">
-                {currencyType}{totalCost.toFixed(3)}
-              </Typography>
+            {/* Aggregate cost + energy */}
+            <Box display="flex" gap={3} sx={{ whiteSpace: "nowrap" }}>
+              <Box textAlign="right">
+                <Typography variant="caption" color="text.secondary" display="block">
+                  Total Run Cost
+                </Typography>
+                <Typography variant="h6" fontWeight={700} color="text.primary">
+                  {currencyType}{totalCost.toFixed(3)}
+                </Typography>
+              </Box>
+              <Box textAlign="right">
+                <Typography variant="caption" color="text.secondary" display="block">
+                  Total Energy
+                </Typography>
+                <Typography variant="h6" fontWeight={700} color="info.light">
+                  {formatEnergy(totalWh)}
+                </Typography>
+              </Box>
             </Box>
           </Box>
         </>

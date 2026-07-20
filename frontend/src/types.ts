@@ -43,6 +43,7 @@ export interface OvenState {
   runtime: number;
   totaltime: number;
   cost: number;
+  wh: number;
   kwh_rate: number;
   currency_type: string;
   profile: string | null;

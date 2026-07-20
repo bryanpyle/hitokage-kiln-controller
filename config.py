@@ -19,7 +19,8 @@ listening_port = 8081
 # to produce the actual cost during a run. My kiln has three
 # elements that when my switches are set to high, consume 9460 watts.
 kwh_rate        = 0.1336  # cost per kilowatt hour per currency_type to calculate cost to run job ## bryan - 13.36 cents per kwh in my area as of 2026-03
-kw_elements     = 8.2 # if the kiln elements are on, the wattage in kilowatts ## bryan - 8.2 kw for all 6 elements running.
+kw_elements     = 10.8 # total kiln wattage in kilowatts (240V × 45A) — used for cost calculation
+kw_zone         = 3.6  # kilowatts per zone (240V × 15A) — used for per-zone watt-hour tracking
 currency_type   = "$"   # Currency Symbol to show when calculating cost to run job
 
 ########################################################################

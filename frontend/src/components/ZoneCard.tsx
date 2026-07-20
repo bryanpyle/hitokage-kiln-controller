@@ -25,6 +25,11 @@ function formatDuration(seconds: number): string {
   return `${s}s`;
 }
 
+function formatEnergy(wh: number): string {
+  if (wh < 1000) return `${Math.round(wh)} Wh`;
+  return `${(wh / 1000).toFixed(2)} kWh`;
+}
+
 const STATE_COLORS: Record<string, "default" | "success" | "warning" | "error"> = {
   IDLE: "default",
   RUNNING: "success",
@@ -113,8 +118,8 @@ export default function ZoneCard({ state, tempScale, heatOnSeconds }: ZoneCardPr
 
         <Divider sx={{ my: 1 }} />
 
-        {/* Heat rate + heat-on timer */}
-        <Box mt={1} display="flex" gap={4}>
+        {/* Heat rate + heat-on timer + zone energy */}
+        <Box mt={1} display="flex" gap={4} flexWrap="wrap">
           <Box>
             <Typography variant="caption" color="text.secondary" display="block">
               Heat Rate
@@ -131,6 +136,18 @@ export default function ZoneCard({ state, tempScale, heatOnSeconds }: ZoneCardPr
                 </Typography>
                 <Typography variant="body2" color={heatOnSeconds > 0 ? "warning.light" : "text.primary"}>
                   {formatDuration(heatOnSeconds)}
+                </Typography>
+              </Box>
+            </Tooltip>
+          )}
+          {state.state !== "IDLE" && (
+            <Tooltip title="Watt-hours consumed by this zone this firing (240V × 15A, duty-cycle weighted)">
+              <Box>
+                <Typography variant="caption" color="text.secondary" display="block">
+                  Energy Used
+                </Typography>
+                <Typography variant="body2" color="info.light">
+                  {formatEnergy(state.wh ?? 0)}
                 </Typography>
               </Box>
             </Tooltip>

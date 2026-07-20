@@ -427,6 +427,7 @@ class Oven(threading.Thread, ABC):
 
     def reset(self):
         self.cost = 0
+        self.wh = 0.0
         self.state = "IDLE"
         self.profile = None
         self.start_time = 0
@@ -549,6 +550,12 @@ class Oven(threading.Thread, ABC):
             cost = 0
         self.cost = self.cost + cost
 
+    def update_wh(self):
+        """Accumulate watt-hours for this zone using the PID duty cycle."""
+        duty = self.pid.pidstats.get('out', 0.0) if self.pid.pidstats else 0.0
+        # kw_zone (kW) * 1000 = W; * duty * (time_step / 3600) = Wh
+        self.wh += config.kw_zone * 1000.0 * duty * (self.time_step / 3600.0)
+
     def get_state(self):
         temp = 0
         try:
@@ -568,6 +575,7 @@ class Oven(threading.Thread, ABC):
             'zone': self.zone_id,
             'zone_name': self.zone_name,
             'cost': self.cost,
+            'wh': self.wh,
             'runtime': self.runtime,
             'temperature': temp,
             'target': self.target,
@@ -633,6 +641,7 @@ class Oven(threading.Thread, ABC):
         profile = Profile(profile_json)
         self.run_profile(profile, startat=startat, allow_seek=False)  # We don't want a seek on an auto restart.
         self.cost = d["cost"]
+        self.wh = d.get("wh", 0.0)
         time.sleep(1)
         self.ovenwatcher.record(profile)
 
@@ -668,6 +677,7 @@ class Oven(threading.Thread, ABC):
                 continue
             if self.state == "RUNNING":
                 self.update_cost()
+                self.update_wh()
                 self.save_automatic_restart_state()
                 self.kiln_must_catch_up()
                 self.update_runtime()
