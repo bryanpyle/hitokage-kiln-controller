@@ -49,6 +49,10 @@ help:
 	@echo "  make docker-down       - Stop and remove containers"
 	@echo "  make docker-logs       - Tail container logs"
 	@echo ""
+	@echo "  Pi production deployment (run on Pi)"
+	@echo "  make deploy-pull       - Pull latest image from ghcr.io and restart"
+	@echo "  make deploy-reset      - Pull + restart + clear stale state files"
+	@echo ""
 	@echo "  Docker (Raspberry Pi hardware)"
 	@echo "  make docker-build-pi   - Build image with RPi requirements (run on Pi)"
 	@echo "  make docker-up-pi      - Build + start with real GPIO/SPI hardware"
@@ -146,6 +150,18 @@ docker-down:
 
 docker-logs:
 	docker compose logs -f kiln
+
+# Pi production deployment — pull latest image from ghcr.io and restart
+# Run this on the Pi to force an update without waiting for Watchtower:
+#   make deploy-reset
+deploy-pull:
+	docker compose -f docker-compose.deploy.yml pull
+	docker compose -f docker-compose.deploy.yml up -d
+
+# Like deploy-pull, but also wipes the per-zone state files so stale
+# RUNNING state can't trigger a bad automatic-restart on startup:
+deploy-reset: deploy-pull
+	docker exec hitokage-kiln rm -f /app/state-data/state-zone*.json || true
 
 # Cross-compile from Mac → ARM64 (Pi 4/5) using buildx.
 # Push to a registry then pull on the Pi, or load locally.
