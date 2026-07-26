@@ -480,7 +480,9 @@ class Oven(threading.Thread, ABC):
         self.reset()
         self.startat = startat * 60
         self.runtime = runtime
-        self.start_time = datetime.datetime.now() - datetime.timedelta(seconds=self.startat)
+        # Anchor start_time so update_runtime() immediately returns `runtime`
+        # (accounts for both user-specified startat and seek_start offset)
+        self.start_time = datetime.datetime.now() - datetime.timedelta(seconds=runtime)
         self.profile = profile
         self.totaltime = profile.get_duration()
         self.state = "RUNNING"
@@ -538,7 +540,7 @@ class Oven(threading.Thread, ABC):
                 self.abort_run()
 
     def reset_if_schedule_ended(self):
-        if self.runtime > self.totaltime:
+        if self.runtime >= self.totaltime:
             log.info("schedule ended, shutting down")
             log.info("total cost = %s%.2f" % (config.currency_type,self.cost))
             self.abort_run()
@@ -612,7 +614,10 @@ class Oven(threading.Thread, ABC):
         # only save state if the feature is enabled
         if not config.automatic_restarts == True:
             return False
-        self.save_state()
+        try:
+            self.save_state()
+        except Exception as e:
+            log.error("zone %d: failed to save restart state: %s" % (self.zone_id, e))
 
     def should_i_automatic_restart(self):
         # only automatic restart if the feature is enabled
@@ -661,30 +666,34 @@ class Oven(threading.Thread, ABC):
 
     def run(self):
         while True:
-            log.debug('Oven running on ' + threading.current_thread().name)
-            if self.state == "IDLE":
-                if self.should_i_automatic_restart() == True:
-                    self.automatic_restart()
-                time.sleep(1)
-                continue
-            if self.state == "PAUSED":
-                self.start_time = self.get_start_time()
-                self.update_runtime()
-                self.update_target_temp()
-                self.heat_then_cool()
-                self.reset_if_emergency()
-                self.reset_if_schedule_ended()
-                continue
-            if self.state == "RUNNING":
-                self.update_cost()
-                self.update_wh()
-                self.save_automatic_restart_state()
-                self.kiln_must_catch_up()
-                self.update_runtime()
-                self.update_target_temp()
-                self.heat_then_cool()
-                self.reset_if_emergency()
-                self.reset_if_schedule_ended()
+            try:
+                log.debug('Oven running on ' + threading.current_thread().name)
+                if self.state == "IDLE":
+                    if self.should_i_automatic_restart() == True:
+                        self.automatic_restart()
+                    time.sleep(1)
+                    continue
+                if self.state == "PAUSED":
+                    self.start_time = self.get_start_time()
+                    self.update_runtime()
+                    self.update_target_temp()
+                    self.heat_then_cool()
+                    self.reset_if_emergency()
+                    self.reset_if_schedule_ended()
+                    continue
+                if self.state == "RUNNING":
+                    self.update_cost()
+                    self.update_wh()
+                    self.save_automatic_restart_state()
+                    self.kiln_must_catch_up()
+                    self.update_runtime()
+                    self.update_target_temp()
+                    self.heat_then_cool()
+                    self.reset_if_emergency()
+                    self.reset_if_schedule_ended()
+            except Exception as e:
+                log.error("zone %d: unhandled exception in run loop, continuing: %s" % (self.zone_id, e), exc_info=True)
+                time.sleep(self.time_step)
 
 class SimulatedOven(Oven):
 
@@ -937,6 +946,11 @@ class Profile():
                 prev_point = self.data[i-1]
                 next_point = self.data[i]
                 break
+
+        # time == last data point (end-of-profile hold); return last segment
+        if prev_point is None and next_point is None and len(self.data) >= 2:
+            prev_point = self.data[-2]
+            next_point = self.data[-1]
 
         return (prev_point, next_point)
 
