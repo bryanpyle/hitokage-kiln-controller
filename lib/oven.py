@@ -627,7 +627,7 @@ class Oven(threading.Thread, ABC):
             duplog.info("automatic restart not possible. state file does not exist or is too old.")
             return False
 
-        with open(config.automatic_restart_state_file) as infile:
+        with open(self.automatic_restart_state_file) as infile:
             d = json.load(infile)
         if d["state"] != "RUNNING":
             duplog.info("automatic restart not possible. state = %s" % (d["state"]))
