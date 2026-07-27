@@ -353,8 +353,15 @@ def api_control(body: ControlCommand):
         startat = body.startat or 0
         allow_seek = startat == 0
         profile = Profile(json.dumps(profile_obj))
-        oven.run_profile(profile, startat=startat, allow_seek=allow_seek)
-        watcher.record(profile)
+        try:
+            oven.run_profile(profile, startat=startat, allow_seek=allow_seek)
+            watcher.record(profile)
+        except Exception as exc:
+            import logging as _logging
+            _logging.getLogger(__name__).error(
+                "zone %d: run_profile failed: %s", body.zone, exc, exc_info=True
+            )
+            raise HTTPException(status_code=500, detail=f"Failed to start profile: {exc}")
 
     elif body.cmd == "stop":
         oven.abort_run()
