@@ -14,7 +14,8 @@ pydantic>=2.9.0           # Data validation (bundled with FastAPI)
 # for folks running raspberry pis
 # we have no proof of anyone using another board yet, but when that 
 # happens, you might want to comment this out.
-RPi.GPIO  # Raspberry Pi GPIO pin control (hardware only)
+rpi-lgpio==0.6  # RPi.GPIO-compatible implementation using Linux gpiochip
+# RPi.GPIO  # Raspberry Pi GPIO pin control (hardware only)
 
 # List of all supported adafruit modules for thermocouples
 adafruit-circuitpython-max31855  # MAX31855 thermocouple interface

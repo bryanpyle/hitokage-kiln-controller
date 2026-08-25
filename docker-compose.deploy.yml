@@ -65,7 +65,7 @@ services:
       # Gives Watchtower access to the Docker socket to manage containers
       - /var/run/docker.sock:/var/run/docker.sock
       # Gives Watchtower access to ghcr.io credentials from docker login
-      - /home/pi/.docker/config.json:/config.json:ro
+      - ${HOME}/.docker/config.json:/config.json:ro
 
     environment:
       # Only watch containers with the watchtower label above
