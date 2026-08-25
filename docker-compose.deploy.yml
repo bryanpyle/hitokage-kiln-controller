@@ -52,29 +52,6 @@ services:
       - kiln-state:/app/state-data
       # To override config without rebuilding:
       # - ./config.py:/app/config.py:ro
-
-    labels:
-      - "com.centurylinklabs.watchtower.enable=true"
-
-  watchtower:
-    image: containrrr/watchtower:latest
-    container_name: watchtower
-    restart: unless-stopped
-
-    volumes:
-      # Gives Watchtower access to the Docker socket to manage containers
-      - /var/run/docker.sock:/var/run/docker.sock
-      # Gives Watchtower access to ghcr.io credentials from docker login
-      - ${HOME}/.docker/config.json:/config.json:ro
-
-    environment:
-      # Only watch containers with the watchtower label above
-      - WATCHTOWER_LABEL_ENABLE=true
-      # Check every 5 minutes (300 seconds)
-      - WATCHTOWER_POLL_INTERVAL=300
-      # Remove old images after updating to keep disk free
-      - WATCHTOWER_CLEANUP=true
-
 volumes:
   kiln-profiles:
   kiln-state:
