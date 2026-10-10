@@ -234,7 +234,7 @@ ignore_tc_cold_junction_temp_low = False
 ignore_tc_temp_high = False
 ignore_tc_temp_low = False
 ignore_tc_voltage_error = False
-ignore_tc_short_errors = False 
+ignore_tc_short_errors = True
 ignore_tc_unknown_error = False
 
 # This overrides all possible thermocouple errors and prevents the 
