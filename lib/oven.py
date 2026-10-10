@@ -98,9 +98,10 @@ class RealBoard(Board):
     Any blinka board that supports SPI can be used. The
     board is automatically detected by blinka.
     '''
-    def __init__(self, spi_cs=None):
+    def __init__(self, spi_cs=None, zone_id=0):
         self.name = None
         self.spi_cs = spi_cs
+        self.zone_id = zone_id
         self.load_libs()
         self.temp_sensor = self.choose_tempsensor()
         Board.__init__(self) 
@@ -114,9 +115,9 @@ class RealBoard(Board):
 
     def choose_tempsensor(self):
         if config.max31855:
-            return Max31855(spi_cs=self.spi_cs)
+            return Max31855(spi_cs=self.spi_cs, zone_id=self.zone_id)
         if config.max31856:
-            return Max31856(spi_cs=self.spi_cs)
+            return Max31856(spi_cs=self.spi_cs, zone_id=self.zone_id)
 
 class SimulatedBoard(Board):
     '''Simulated board used during simulations.
@@ -151,8 +152,9 @@ class TempSensorReal(TempSensor):
        inputs
            config.temperature_average_samples 
     '''
-    def __init__(self, spi_cs=None):
+    def __init__(self, spi_cs=None, zone_id=0):
         TempSensor.__init__(self)
+        self.zone_id = zone_id
         self.sleeptime = self.time_step / float(config.temperature_average_samples)
         self.temptracker = TempTracker()
         self.spi_setup()
@@ -169,7 +171,8 @@ class TempSensorReal(TempSensor):
         GPIO.setup(self.clk_pin,  GPIO.OUT)
         GPIO.setup(self.miso_pin, GPIO.IN)
         GPIO.output(self.clk_pin, GPIO.LOW)
-        log.info("Raw GPIO SPI: CLK=GPIO%d  MISO=GPIO%d" % (self.clk_pin, self.miso_pin))
+        log.info("zone %d: Raw GPIO SPI: CLK=GPIO%d  MISO=GPIO%d" % (
+            self.zone_id + 1, self.clk_pin, self.miso_pin))
 
     def get_temperature(self):
         '''read temp from tc and convert if needed'''
@@ -182,10 +185,12 @@ class TempSensorReal(TempSensor):
             return temp
         except ThermocoupleError as tce:
             if tce.ignore:
-                log.error("Problem reading temp (ignored) %s" % (tce.message))
+                log.error("zone %d: Problem reading temp (ignored) %s" % (
+                    self.zone_id + 1, tce.message))
                 self.status.good()
             else:
-                log.error("Problem reading temp %s" % (tce.message))
+                log.error("zone %d: Problem reading temp %s" % (
+                    self.zone_id + 1, tce.message))
                 self.status.bad()
         return None
 
@@ -252,9 +257,10 @@ class Max31855(TempSensorReal):
     '''each subclass expected to handle errors and get temperature.
     Uses raw RPi.GPIO bit-bang SPI — no adafruit/blinka libraries required.
     '''
-    def __init__(self, spi_cs=None):
-        TempSensorReal.__init__(self, spi_cs=spi_cs)
-        log.info("thermocouple MAX31855 (raw GPIO SPI, CS=GPIO%d)" % self.cs_pin)
+    def __init__(self, spi_cs=None, zone_id=0):
+        TempSensorReal.__init__(self, spi_cs=spi_cs, zone_id=zone_id)
+        log.info("zone %d: thermocouple MAX31855 (raw GPIO SPI, CS=GPIO%d)" % (
+            self.zone_id + 1, self.cs_pin))
 
     def _read_raw(self):
         '''Bit-bang 32 bits from the MAX31855 and return the raw integer.'''
@@ -362,9 +368,10 @@ class Max31856(TempSensorReal):
     '''MAX31856 support requires adafruit-circuitpython-max31856 and blinka.
     Not used when max31856 = 0 in config.py (default).
     '''
-    def __init__(self, spi_cs=None):
-        TempSensorReal.__init__(self, spi_cs=spi_cs)
-        log.info("thermocouple MAX31856 (requires adafruit/blinka libraries)")
+    def __init__(self, spi_cs=None, zone_id=0):
+        TempSensorReal.__init__(self, spi_cs=spi_cs, zone_id=zone_id)
+        log.info("zone %d: thermocouple MAX31856 (requires adafruit/blinka libraries)" % (
+            self.zone_id + 1))
         import busio
         import digitalio
         import adafruit_bitbangio as bitbangio
@@ -486,8 +493,9 @@ class Oven(threading.Thread, ABC):
         self.profile = profile
         self.totaltime = profile.get_duration()
         self.state = "RUNNING"
-        log.info("Running schedule %s starting at %d minutes" % (profile.name,startat))
-        log.info("Starting")
+        log.info("zone %d: Running schedule %s starting at %d minutes" % (
+            self.zone_id + 1, profile.name, startat))
+        log.info("zone %d: Starting" % (self.zone_id + 1))
 
     def abort_run(self):
         self.reset()
@@ -530,18 +538,18 @@ class Oven(threading.Thread, ABC):
         '''reset if the temperature is way TOO HOT, or other critical errors detected'''
         if (self.board.temp_sensor.temperature() + self.thermocouple_offset >=
             config.emergency_shutoff_temp):
-            log.info("emergency!!! temperature too high")
+            log.info("zone %d: emergency!!! temperature too high" % (self.zone_id + 1))
             if config.ignore_temp_too_high == False:
                 self.abort_run()
         
         if self.board.temp_sensor.status.over_error_limit():
-            log.info("emergency!!! too many errors in a short period")
+            log.info("zone %d: emergency!!! too many errors in a short period" % (self.zone_id + 1))
             if config.ignore_tc_too_many_errors == False:
                 self.abort_run()
 
     def reset_if_schedule_ended(self):
         if self.runtime >= self.totaltime:
-            log.info("schedule ended, shutting down")
+            log.info("zone %d: schedule ended, shutting down" % (self.zone_id + 1))
             log.info("total cost = %s%.2f" % (config.currency_type,self.cost))
             self.abort_run()
 
@@ -801,8 +809,9 @@ class SimulatedOven(Oven):
         time_left = self.totaltime - self.runtime
 
         try:
-            log.info("temp=%.2f, target=%.2f, error=%.2f, pid=%.2f, p=%.2f, i=%.2f, d=%.2f, heat_on=%.2f, heat_off=%.2f, run_time=%d, total_time=%d, time_left=%d" %
-                (self.pid.pidstats['ispoint'],
+            log.info("zone %d: temp=%.2f, target=%.2f, error=%.2f, pid=%.2f, p=%.2f, i=%.2f, d=%.2f, heat_on=%.2f, heat_off=%.2f, run_time=%d, total_time=%d, time_left=%d" %
+                (self.zone_id + 1,
+                self.pid.pidstats['ispoint'],
                 self.pid.pidstats['setpoint'],
                 self.pid.pidstats['err'],
                 self.pid.pidstats['pid'],
@@ -838,7 +847,7 @@ class RealOven(Oven):
         thermocouple_offset=None,
         automatic_restart_state_file=None,
     ):
-        self.board = RealBoard(spi_cs=spi_cs)
+        self.board = RealBoard(spi_cs=spi_cs, zone_id=zone_id)
         self.output = Output(gpio_heat=gpio_heat, gpio_heat_invert=gpio_heat_invert)
 
         super().__init__(
@@ -888,8 +897,9 @@ class RealOven(Oven):
             self.output.cool(heat_off)
         time_left = self.totaltime - self.runtime
         try:
-            log.info("temp=%.2f, target=%.2f, error=%.2f, pid=%.2f, p=%.2f, i=%.2f, d=%.2f, heat_on=%.2f, heat_off=%.2f, run_time=%d, total_time=%d, time_left=%d" %
-                (self.pid.pidstats['ispoint'],
+            log.info("zone %d: temp=%.2f, target=%.2f, error=%.2f, pid=%.2f, p=%.2f, i=%.2f, d=%.2f, heat_on=%.2f, heat_off=%.2f, run_time=%d, total_time=%d, time_left=%d" %
+                (self.zone_id + 1,
+                self.pid.pidstats['ispoint'],
                 self.pid.pidstats['setpoint'],
                 self.pid.pidstats['err'],
                 self.pid.pidstats['pid'],
