@@ -71,9 +71,10 @@ export default function ControlPanel({
   const profileName = anyZoneState?.profile ?? null;
   const catchingUp = anyZoneState?.catching_up ?? false;
 
-  // Aggregate run cost and energy across all zones
-  const totalCost = allZoneStates.reduce((sum, s) => sum + (s?.cost ?? 0), 0);
+  // Aggregate energy and calculate its cost at the configured per-kWh rate
   const totalWh = allZoneStates.reduce((sum, s) => sum + (s?.wh ?? 0), 0);
+  const kwhRate = anyZoneState?.kwh_rate ?? 0;
+  const totalCost = (totalWh / 1000) * kwhRate;
   const currencyType = anyZoneState?.currency_type ?? "$";
 
   function formatEnergy(wh: number): string {
