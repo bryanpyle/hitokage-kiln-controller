@@ -19,7 +19,8 @@ endef
         dev clean-venv \
         docker-build-sim docker-build-pi \
         docker-up-sim docker-up-pi \
-        docker-down docker-logs docker-push
+		docker-down docker-logs docker-push \
+		deploy-pull deploy-reset
 
 help:
 	@echo "Available targets:"
@@ -51,7 +52,7 @@ help:
 	@echo ""
 	@echo "  Pi production deployment (run on Pi)"
 	@echo "  make deploy-pull       - Pull latest image from ghcr.io and restart"
-	@echo "  make deploy-reset      - Pull + restart + clear stale state files"
+	@echo "  make deploy-reset      - Git pull + deploy + clear state + copy all profiles"
 	@echo ""
 	@echo "  Docker (Raspberry Pi hardware)"
 	@echo "  make docker-build-pi   - Build image with RPi requirements (run on Pi)"
@@ -158,10 +159,13 @@ deploy-pull:
 	docker compose -f docker-compose.deploy.yml pull
 	docker compose -f docker-compose.deploy.yml up -d
 
-# Like deploy-pull, but also wipes the per-zone state files so stale
-# RUNNING state can't trigger a bad automatic-restart on startup:
-deploy-reset: deploy-pull
+# Update the Pi checkout, deploy the latest image, clear per-zone state, and
+# copy all local profiles into the persistent profile volume:
+deploy-reset:
+	git pull
+	$(MAKE) deploy-pull
 	docker exec hitokage-kiln rm -f /app/state-data/state-zone*.json || true
+	docker cp storage/profiles/. hitokage-kiln:/app/storage/profiles/
 
 # Cross-compile from Mac → ARM64 (Pi 4/5) using buildx.
 # Push to a registry then pull on the Pi, or load locally.
